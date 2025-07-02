@@ -1,3 +1,5 @@
+#intalando as dependências necessárias: pip install matplotlib numpy
+
 import math
 import numpy as np
 import matplotlib.pyplot as plt
