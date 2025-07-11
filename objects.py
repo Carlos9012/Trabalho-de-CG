@@ -48,7 +48,6 @@ class Cano:
         return np.array(vertices), np.array(faces)
 
 
-
 class CanoCurvo:
     def __init__(self, raio_externo=1.0, comprimento=5.0, espessura=0.2, n_segmentos=32, pontos_controle=None):
         self.raio_externo = raio_externo
