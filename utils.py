@@ -194,30 +194,47 @@ def mostrar_cena_camera_3D(objetos, eye, at, up=np.array([0, 1, 0]), mostrar_mal
     plt.show()
 
 def projetar_perspectiva_2d(objetos,
-                            eye,
-                            at,
-                            up=np.array([0, 1, 0]),
-                            fov=60,
-                            aspect_ratio=1,
-                            near=1,
-                            far=100,
-                            desenhar_faces=True):
+                          eye,
+                          at,
+                          up=np.array([0, 1, 0]),
+                          fov=60,
+                          aspect_ratio=1,
+                          near=1,
+                          far=100,
+                          desenhar_faces=True,
+                          alpha=0.6,
+                          padding=0.1):
     """
-    Projeta objetos 3D em uma vista 2D utilizando projeção perspectiva,
-    conforme as fórmulas do PDF (com coordenadas NDC).
+    Projeta objetos 3D em uma vista 2D utilizando projeção perspectiva com faces coloridas.
+    
+    Parâmetros:
+    - objetos: Lista de tuplas (objeto, escala, rotação, translação, cor)
+    - eye: Posição da câmera
+    - at: Ponto para onde a câmera está olhando
+    - up: Vetor up da câmera
+    - fov: Campo de visão em graus
+    - aspect_ratio: Proporção da tela
+    - near: Plano near
+    - far: Plano far
+    - desenhar_faces: Se True, desenha faces preenchidas
+    - alpha: Transparência das faces (0-1)
+    - padding: Espaço adicional ao redor dos objetos (fração do tamanho total)
     """
-
     # Passo 1: base da câmera (view matrix)
     n = (eye - at)
-    n = n / np.linalg.norm(n)
+    n = n / (np.linalg.norm(n) + 1e-8)
+    
+    if np.allclose(np.cross(up, n), 0):
+        up = np.array([0, 0, 1]) if not np.allclose(up, [0, 0, 1]) else np.array([1, 0, 0])
+    
     u = np.cross(up, n)
-    u = u / np.linalg.norm(u)
+    u = u / (np.linalg.norm(u) + 1e-8)
     v = np.cross(n, u)
-    R = np.stack([u, v, n], axis=0)  # base ortonormal da câmera
+    R = np.stack([u, v, n], axis=0)
 
-    # Passo 2: construção da matriz de projeção (do PDF)
-    alpha = np.radians(fov)
-    t = np.tan(alpha / 2)
+    # Passo 2: construção da matriz de projeção
+    alpha_rad = np.radians(fov)
+    t = np.tan(alpha_rad / 2)
 
     A = far / (far - near)
     B = -far * near / (far - near)
@@ -230,35 +247,63 @@ def projetar_perspectiva_2d(objetos,
     ])
 
     fig, ax = plt.subplots(figsize=(8, 8))
+    
+    # Lista para armazenar todas as coordenadas 2D
+    todos_vertices_2d = []
 
     for obj, esc, rot, trans, cor in objetos:
-        v = _transformar_vertices(obj.vertices, esc, rot, trans)
+        vertices_originais = np.array(obj.vertices)
+        v = _transformar_vertices(vertices_originais, esc, rot, trans)
 
         # Sistema da câmera
         v_camera = (v - eye) @ R.T
 
-        # Homogêneo
+        # Homogêneo e projeção
         v_homog = np.hstack([v_camera, np.ones((v_camera.shape[0], 1))])
         v_clip = (P @ v_homog.T).T
         v_ndc = v_clip[:, :3] / v_clip[:, [3]]
-
-        # Projeção final: apenas (x, y)
         v_2d = v_ndc[:, :2]
+        
+        # Adiciona vértices à lista geral
+        todos_vertices_2d.append(v_2d)
 
         if desenhar_faces:
-            # Desenhar wireframe com base nas faces
+            # Desenhar faces preenchidas
             for face in obj.faces:
-                pts = v_2d[face]
-                x = np.append(pts[:, 0], pts[0, 0])
-                y = np.append(pts[:, 1], pts[0, 1])
-                ax.plot(x, y, color=cor, linewidth=0.5)
+                if all(idx < len(v_2d) for idx in face):
+                    polygon = plt.Polygon(v_2d[face], color=cor, alpha=alpha, linewidth=0.3)
+                    ax.add_patch(polygon)
         else:
             ax.scatter(v_2d[:, 0], v_2d[:, 1], s=1, color=cor)
 
-    ax.set_xlim(-1, 1)
-    ax.set_ylim(-1, 1)
+    # Calcular limites dinâmicos
+    if todos_vertices_2d:
+        todos_vertices_2d = np.vstack(todos_vertices_2d)
+        x_min, y_min = np.min(todos_vertices_2d, axis=0)
+        x_max, y_max = np.max(todos_vertices_2d, axis=0)
+        
+        # Calcular tamanho máximo em qualquer direção
+        x_size = x_max - x_min
+        y_size = y_max - y_min
+        max_size = max(x_size, y_size)
+        
+        # Centralizar e adicionar padding
+        x_center = (x_min + x_max) / 2
+        y_center = (y_min + y_max) / 2
+        x_min = x_center - max_size/2 * (1 + padding)
+        x_max = x_center + max_size/2 * (1 + padding)
+        y_min = y_center - max_size/2 * (1 + padding)
+        y_max = y_center + max_size/2 * (1 + padding)
+        
+        ax.set_xlim(x_min, x_max)
+        ax.set_ylim(y_min, y_max)
+    else:
+        # Fallback caso não haja vértices
+        ax.set_xlim(-1, 1)
+        ax.set_ylim(-1, 1)
+
     ax.set_aspect('equal')
-    ax.set_title("Projeção Perspectiva 2D (NDC)")
+    ax.set_title("Projeção Perspectiva 2D com Faces Coloridas")
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     plt.grid(True)

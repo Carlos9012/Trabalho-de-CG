@@ -47,7 +47,7 @@ if __name__ == '__main__':
     at = np.array([0, 0, 0])       # Ponto de foco
     up = np.array([0, 1, 0])       # Vetor "up"
 
-    mostrar_cena_camera_3D(objetos, eye, at, up)
+    #mostrar_cena_camera_3D(objetos, eye, at, up)
     T=1
     objetos = [
         (cano, T, np.eye(3), np.array([-10, -10, 0]), 'lightblue'),
@@ -59,4 +59,4 @@ if __name__ == '__main__':
      # Projeção em perspectiva dos mesmos objetos
     eye = np.array([5, 10, 10])    # Câmera posicionada a 15 unidades acima da origem
     at = np.array([0, 0, 0])  
-    #projetar_perspectiva_2d(objetos, eye, at, desenhar_faces=True)
+    projetar_perspectiva_2d(objetos, eye, at, desenhar_faces=True)
