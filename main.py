@@ -35,11 +35,19 @@ if __name__ == '__main__':
     ]
     #compor_cena_varios(objetos, mostrar_malha=True, tam_max=10.0,)
 
+    T = 1
+    objetos = [
+        (cano, T, np.eye(3), np.array([-4, -4, 0]), 'lightblue'),
+        (cano_curvo, T, np.eye(3), np.array([4, 4, 0]), 'salmon'),
+        (cilindro, T, np.eye(3), np.array([0, 0, 0]), 'khaki'),
+        (linha4,   T, np.eye(3), np.array([8,  8, 0]), 'red'),
+        (paralelepipedo, T, np.eye(3), np.array([-8,  -8, 0]), 'lightgreen')
+    ]
     eye = np.array([10, 10, 10])  # Posição da câmera
     at = np.array([0, 0, 0])       # Ponto de foco
     up = np.array([0, 1, 0])       # Vetor "up"
 
-    #mostrar_cena_camera_3D(objetos, eye, at, up)
+    mostrar_cena_camera_3D(objetos, eye, at, up)
     T=1
     objetos = [
         (cano, T, np.eye(3), np.array([-10, -10, 0]), 'lightblue'),
