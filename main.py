@@ -1,9 +1,7 @@
 #instalando as dependências necessárias: pip install matplotlib numpy
 import numpy as np
 from objects import Cano, CanoCurvo, Cilindro, LinhaReta4, Paralelepipedo
-from utils import  plotar, compor_cena_varios, mostrar_cena_camera_3D, projetar_perspectiva_2d
-
-
+from utils import  plotar, compor_cena_varios, mostrar_cena_camera_3D, projetar_perspectiva_2d, visualizar_rasterizacoes
 
 
 if __name__ == '__main__':
@@ -59,4 +57,17 @@ if __name__ == '__main__':
      # Projeção em perspectiva dos mesmos objetos
     eye = np.array([5, 10, 10])    # Câmera posicionada a 15 unidades acima da origem
     at = np.array([0, 0, 0])  
-    projetar_perspectiva_2d(objetos, eye, at, desenhar_faces=True)
+    #projetar_perspectiva_2d(objetos, eye, at, desenhar_faces=True)
+
+    cano = Cano(raio_externo=1.0, comprimento=5.0, espessura=0.2)
+    cano_curvo = CanoCurvo(raio_externo=0.8, comprimento=6.0, espessura=0.15)
+    cilindro = Cilindro(raio=1.0, altura=4.0)
+    paralelepipedo = Paralelepipedo(largura=3.0, altura=2.0, espessura=1.0)
+    linha = LinhaReta4()
+
+    # Visualizar rasterizações
+    visualizar_rasterizacoes(cano, "Cano Reto")
+    visualizar_rasterizacoes(cano_curvo, "Cano Curvo")
+    visualizar_rasterizacoes(cilindro, "Cilindro")
+    visualizar_rasterizacoes(paralelepipedo, "Paralelepípedo")
+    visualizar_rasterizacoes(linha, "Linha")

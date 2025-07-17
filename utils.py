@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from matplotlib.patches import Patch 
+from objects import Cano, CanoCurvo, Cilindro, LinhaReta4, Paralelepipedo
 
 
 def _transformar_vertices(vertices, escala=1.0, rotacao=np.eye(3), translacao=np.zeros(3)):
@@ -307,5 +308,105 @@ def projetar_perspectiva_2d(objetos,
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+def rasterizar_objeto(objeto, resolucao='media'):
+    # Define parâmetros de resolução para cada tipo de objeto
+    if isinstance(objeto, Cano):
+        if resolucao == 'baixa':
+            return Cano(objeto.vertices[0][0], objeto.vertices[-1][2], 
+                       espessura=objeto.vertices[0][0]-objeto.vertices[1][0], 
+                       n_segmentos=8, n_cortes=5)
+        elif resolucao == 'media':
+            return Cano(objeto.vertices[0][0], objeto.vertices[-1][2], 
+                       espessura=objeto.vertices[0][0]-objeto.vertices[1][0], 
+                       n_segmentos=16, n_cortes=10)
+        else:  # alta
+            return objeto  # Mantém a resolução original
+        
+    elif isinstance(objeto, CanoCurvo):
+        if resolucao == 'baixa':
+            return CanoCurvo(raio_externo=objeto.raio_externo, 
+                           comprimento=objeto.comprimento,
+                           espessura=objeto.espessura,
+                           n_segmentos=8)
+        elif resolucao == 'media':
+            return CanoCurvo(raio_externo=objeto.raio_externo, 
+                           comprimento=objeto.comprimento,
+                           espessura=objeto.espessura,
+                           n_segmentos=16)
+        else:  # alta
+            return objeto
+            
+    elif isinstance(objeto, Cilindro):
+        if resolucao == 'baixa':
+            return Cilindro(raio=objeto.vertices[0][0], 
+                          altura=objeto.vertices[-1][2],
+                          n=8, m=5)
+        elif resolucao == 'media':
+            return Cilindro(raio=objeto.vertices[0][0], 
+                          altura=objeto.vertices[-1][2],
+                          n=16, m=10)
+        else:  # alta
+            return objeto
+            
+    elif isinstance(objeto, LinhaReta4):
+        # Objeto simples, mantém a mesma resolução
+        return objeto
+        
+    elif isinstance(objeto, Paralelepipedo):
+        if resolucao == 'baixa':
+            return Paralelepipedo(largura=objeto.vertices[-1][0]*2,
+                                altura=objeto.vertices[-1][2],
+                                espessura=objeto.vertices[0][1]*2,
+                                n=1, m=1, l=1)
+        elif resolucao == 'media':
+            return Paralelepipedo(largura=objeto.vertices[-1][0]*2,
+                                altura=objeto.vertices[-1][2],
+                                espessura=objeto.vertices[0][1]*2,
+                                n=2, m=2, l=2)
+        else:  # alta
+            return objeto
+            
+    else:
+        raise ValueError("Tipo de objeto não suportado")
+
+def visualizar_rasterizacoes(objeto_original, nome_objeto):
+    fig = plt.figure(figsize=(18, 6))
+    
+    # Rasterizações
+    resolucoes = ['baixa', 'media', 'alta']
+    
+    for i, resolucao in enumerate(resolucoes, 1):
+        ax = fig.add_subplot(1, 3, i, projection='3d')
+        
+        # Rasterizar o objeto
+        objeto = rasterizar_objeto(objeto_original, resolucao)
+        
+        # Converter vértices e faces para arrays NumPy
+        vertices = np.array(objeto.vertices)
+        faces = np.array(objeto.faces)
+        
+        # Plotar
+        mesh = Poly3DCollection(vertices[faces],  # Agora funciona pois ambos são arrays NumPy
+                              alpha=0.8,
+                              linewidths=0.3,
+                              edgecolor='k',
+                              facecolor='skyblue')
+        ax.add_collection3d(mesh)
+        
+        # Ajustar visualização
+        todos_v = np.vstack(vertices)
+        centro = np.mean(todos_v, axis=0)
+        max_dist = np.max(np.linalg.norm(todos_v - centro, axis=1)) * 1.5
+        
+        ax.set_xlim(centro[0]-max_dist, centro[0]+max_dist)
+        ax.set_ylim(centro[1]-max_dist, centro[1]+max_dist)
+        ax.set_zlim(centro[2]-max_dist, centro[2]+max_dist)
+        
+        ax.set_title(f"{nome_objeto} - Resolução {resolucao.capitalize()}\n"
+                   f"Vértices: {len(vertices)}, Faces: {len(faces)}")
+    
     plt.tight_layout()
     plt.show()
