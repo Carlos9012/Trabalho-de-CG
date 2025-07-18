@@ -13,7 +13,7 @@ class Cano:
 
         # Gerar vértices para cada segmento ao longo do comprimento
         for k in range(n_cortes + 1):
-            z = comprimento * k / n_cortes
+            z = comprimento * k / n_cortes  # Agora começa em 0 e vai até comprimento
             for i in range(n_segmentos):
                 theta = 2 * math.pi * i / n_segmentos
                 
@@ -27,7 +27,7 @@ class Cano:
                 y_int = raio_interno * math.sin(theta)
                 vertices.append([x_int, y_int, z])
 
-        # Gerar faces para a superfície lateral
+        # Gerar faces para a superfície lateral (mesmo código anterior)
         for k in range(n_cortes):
             for i in range(n_segmentos):
                 next_i = (i + 1) % n_segmentos
@@ -51,13 +51,13 @@ class Cano:
                 faces.append([a_int, b_next_int, a_next_int])
                 faces.append([a_int, b_int, b_next_int])
                 
-                # Face superior (conectando interno e externo)
-                if k == 0:  # Primeira extremidade
+                # Face superior (tampa na base - agora em z=0)
+                if k == 0:
                     faces.append([a_ext, b_ext, a_int])
                     faces.append([b_ext, b_int, a_int])
                 
-                # Face inferior (conectando interno e externo)
-                if k == n_cortes - 1:  # Última extremidade
+                # Face inferior (tampa no topo - em z=comprimento)
+                if k == n_cortes - 1:
                     faces.append([a_next_ext, a_next_int, b_next_ext])
                     faces.append([b_next_ext, a_next_int, b_next_int])
 
@@ -177,38 +177,34 @@ class Cilindro:
         return np.array(vertices), np.array(faces)
 
 
-class LinhaReta4:
-    def __init__(self, comprimento=4.0, espessura=0.1):
-        self.vertices, self.faces = self._gerar_malha(comprimento, espessura)
+class LinhaReta:
+    def __init__(self, comprimento=4.0):
+        self.vertices, self.faces = self._gerar_linha(comprimento)
+
+    @classmethod
+    def from_vertices(cls, vertices):
+        line = cls.__new__(cls)
+        line.vertices = np.array(vertices)
+        line.faces = np.empty((0, 3), dtype=int)  # Linhas não têm faces
+        return line
 
     @staticmethod
-    def _gerar_malha(comp, e):
+    def _gerar_linha(comp):
         v = np.array([
-            [-e/2, -e/2, 0],  [ e/2, -e/2, 0],
-            [ e/2,  e/2, 0],  [-e/2,  e/2, 0],
-            [-e/2, -e/2, comp], [ e/2, -e/2, comp],
-            [ e/2,  e/2, comp], [-e/2,  e/2, comp]
+            [0, 0, 0],       # Ponto inicial (origem)
+            [0, 0, comp]     # Ponto final (ao longo do eixo Z)
         ])
-
-        f = np.array([
-            [0,1,2], [0,2,3],          # base
-            [4,6,5], [4,7,6],          # topo
-            [0,4,1], [1,4,5],          # lado 1
-            [1,5,2], [2,5,6],          # lado 2
-            [2,6,3], [3,6,7],          # lado 3
-            [3,7,0], [0,7,4]           # lado 4
-        ])
-
+        f = np.empty((0, 3), dtype=int)
         return v, f
-    
-    
+        
+
 class Paralelepipedo:
     def __init__(self, largura, altura, espessura, n=1, m=1, l=1):
         self.vertices, self.faces = self._gerar_malha(largura, altura, espessura, n, m, l)
 
     @staticmethod
     def _gerar_malha(largura, altura, espessura, n, m, l):
-        # Divisões ao longo de X, Y, Z
+        # Divisões ao longo de cada eixo
         dx = largura / n
         dy = espessura / l
         dz = altura / m
@@ -216,59 +212,67 @@ class Paralelepipedo:
         vertices = []
         index_map = {}
 
-        # Gera os vértices na grade 3D
+        # Gera vértices na grade 3D começando em [0,0,0]
         idx = 0
         for k in range(m + 1):       # Altura (Z)
             z = dz * k
-            for j in range(l + 1):   # Espessura (Y)
-                y = -espessura / 2 + dy * j
+            for j in range(l + 1):   # espessura (Y)
+                y = dy * j
                 for i in range(n + 1):  # Largura (X)
-                    x = -largura / 2 + dx * i
+                    x = dx * i
                     vertices.append([x, y, z])
                     index_map[(i, j, k)] = idx
                     idx += 1
 
         faces = []
 
-        # Faces laterais ao longo da altura (m), subdivididas em X (n)
-        for j in range(l):  # frente e trás
+        # Faces frontais e traseiras
+        for j in range(l):
             for i in range(n):
                 for k in range(m):
-                    # Face frontal
+                    # Face frontal (Y mínimo)
                     a = index_map[(i, j, k)]
                     b = index_map[(i + 1, j, k)]
                     c = index_map[(i + 1, j, k + 1)]
                     d = index_map[(i, j, k + 1)]
                     faces.extend([[a, b, c], [a, c, d]])
 
-                    # Face traseira
+                    # Face traseira (Y máximo)
                     a = index_map[(i, j + 1, k)]
                     b = index_map[(i + 1, j + 1, k)]
                     c = index_map[(i + 1, j + 1, k + 1)]
                     d = index_map[(i, j + 1, k + 1)]
                     faces.extend([[d, c, b], [d, b, a]])
 
-        # Faces laterais direita e esquerda
-        for i in range(n + 1):  # fixa em i
+        # Faces laterais
+        for i in [0, n]:
             for j in range(l):
                 for k in range(m):
-                    a = index_map[(i, j, k)]
-                    b = index_map[(i, j + 1, k)]
-                    c = index_map[(i, j + 1, k + 1)]
-                    d = index_map[(i, j, k + 1)]
-                    faces.extend([[a, b, c], [a, c, d]])
+                    if i == 0:  # Face esquerda
+                        a = index_map[(i, j, k)]
+                        b = index_map[(i, j + 1, k)]
+                        c = index_map[(i, j + 1, k + 1)]
+                        d = index_map[(i, j, k + 1)]
+                        faces.extend([[a, b, c], [a, c, d]])
+                    else:  # Face direita
+                        a = index_map[(i, j, k)]
+                        b = index_map[(i, j + 1, k)]
+                        c = index_map[(i, j + 1, k + 1)]
+                        d = index_map[(i, j, k + 1)]
+                        faces.extend([[d, c, b], [d, b, a]])
 
         # Faces superior e inferior
-        for k in [0, m]:  # z fixo (baixo e topo)
+        for k in [0, m]:
             for j in range(l):
                 for i in range(n):
                     a = index_map[(i, j, k)]
                     b = index_map[(i + 1, j, k)]
                     c = index_map[(i + 1, j + 1, k)]
                     d = index_map[(i, j + 1, k)]
-                    if k == 0:  # inferior
+                    if k == 0:  # Face inferior
                         faces.extend([[a, b, c], [a, c, d]])
-                    else:  # superior
+                    else:  # Face superior
                         faces.extend([[d, c, b], [d, b, a]])
 
         return np.array(vertices), np.array(faces)
+    
