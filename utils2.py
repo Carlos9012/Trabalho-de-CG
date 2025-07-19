@@ -1,5 +1,6 @@
 # Módulo para centralizar as fórmulas de Álgebra Linear e Computação Gráfica
 import numpy as np
+import matplotlib.pyplot as plt
 
 # ==============================================================================
 # FÓRMULAS DE CURVAS
@@ -221,3 +222,68 @@ def transformar_pontos(pontos, matriz_transformacao):
     # Converte de volta para 3D (se necessário)
     # A divisão por w é feita na etapa de projeção
     return pontos_transformados_homogeneos[:, :3]
+
+
+
+# ==============================================================================
+# ALGORITMOS DE RASTERIZAÇÃO 2D
+# ==============================================================================
+
+def rasterizar_linha_bresenham(p1, p2):
+    """Rasteriza uma linha 2D usando o Algoritmo de Bresenham."""
+    x1, y1 = int(p1[0]), int(p1[1])
+    x2, y2 = int(p2[0]), int(p2[1])
+    pixels = []
+    dx, dy = abs(x2 - x1), abs(y2 - y1)
+    sx = 1 if x1 < x2 else -1
+    sy = 1 if y1 < y2 else -1
+    trocado = dy > dx
+    if trocado:
+        dx, dy = dy, dx
+    p = 2 * dy - dx
+    x, y = x1, y1
+    for _ in range(dx + 1):
+        pixels.append((x, y))
+        if p >= 0:
+            if trocado: x += sx
+            else: y += sy
+            p -= 2 * dx
+        if trocado: y += sy
+        else: x += sx
+        p += 2 * dy
+    return pixels
+
+def rasterizar_poligono_scanline(vertices):
+    """Rasteriza um polígono 2D usando o Algoritmo Scan-Line."""
+    if len(vertices) < 3: return []
+    pixels = []
+    min_y = int(np.ceil(min(v[1] for v in vertices)))
+    max_y = int(np.floor(max(v[1] for v in vertices)))
+    edge_table = {y: [] for y in range(min_y, max_y + 1)}
+    num_vertices = len(vertices)
+    for i in range(num_vertices):
+        p1 = vertices[i]
+        p2 = vertices[(i + 1) % num_vertices]
+        if p1[1] > p2[1]: p1, p2 = p2, p1
+        y_min_aresta, y_max_aresta = p1[1], p2[1]
+        if y_min_aresta == y_max_aresta: continue
+        x_na_y_min = p1[0]
+        inclinacao_inversa = (p2[0] - p1[0]) / (p2[1] - p1[1])
+        edge_table[int(np.ceil(y_min_aresta))].append([y_max_aresta, x_na_y_min, inclinacao_inversa])
+    
+    active_edge_table = []
+    for y in range(min_y, max_y + 1):
+        for aresta in edge_table[y]:
+            active_edge_table.append(aresta)
+        active_edge_table = [aresta for aresta in active_edge_table if aresta[0] > y]
+        active_edge_table.sort(key=lambda aresta: aresta[1])
+        for i in range(0, len(active_edge_table), 2):
+            if i + 1 < len(active_edge_table):
+                x_inicio = int(np.ceil(active_edge_table[i][1]))
+                x_fim = int(np.floor(active_edge_table[i+1][1]))
+                for x in range(x_inicio, x_fim + 1):
+                    pixels.append((x, y))
+        for aresta in active_edge_table:
+            aresta[1] += aresta[2]
+    return pixels
+

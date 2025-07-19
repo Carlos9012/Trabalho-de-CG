@@ -1,8 +1,7 @@
 #instalando as dependências necessárias: pip install matplotlib numpy
 import numpy as np
 from objects import Cano, CanoCurvo, Cilindro, LinhaReta, Paralelepipedo
-from utils import  plotar, compor_cena_varios, mostrar_cena_camera_3D, projetar_perspectiva_2d, visualizar_rasterizacoes
-
+from utils import  plotar, compor_cena_varios, mostrar_cena_camera_3D, projetar_perspectiva_2d
 
 if __name__ == '__main__':
     cano = Cano(1.0, 5.0, 0.1)
@@ -28,7 +27,7 @@ if __name__ == '__main__':
         (paralelepipedo, T, np.eye(3), np.array([-10,  -10, 0]), 'lightgreen')
     ]
     
-    compor_cena_varios(objetos, mostrar_malha=True, tam_max=10.0,)
+    # compor_cena_varios(objetos, mostrar_malha=True, tam_max=10.0,)
 
     #Q3
     T = 1
@@ -43,7 +42,7 @@ if __name__ == '__main__':
     at = np.array([1, 0, 0])       # Ponto de foco
     up = np.array([0, 1, 0])       # Vetor "up"
 
-    mostrar_cena_camera_3D(objetos, eye, at, up)
+    # mostrar_cena_camera_3D(objetos, eye, at, up)
 
     #Q4
     T=1
@@ -57,17 +56,5 @@ if __name__ == '__main__':
      # Projeção em perspectiva dos mesmos objetos
     eye = np.array([5, 10, 10])    # Câmera posicionada a 15 unidades acima da origem
     at = np.array([0, 0, 0])  
-    projetar_perspectiva_2d(objetos, eye, at, desenhar_faces=True)
+    # projetar_perspectiva_2d(objetos, eye, at, desenhar_faces=True)
 
-    #Q5
-    cano = Cano(raio_externo=1.0, comprimento=5.0, espessura=0.2)
-    cano_curvo = CanoCurvo(raio_externo=0.8, comprimento=6.0, espessura=0.15)
-    cilindro = Cilindro(raio=1.0, altura=4.0)
-    paralelepipedo = Paralelepipedo(largura=4, altura=3, espessura=2, n=4, m=3, l=1)
-    linha = LinhaReta()
-
-    #visualizar_rasterizacoes(cano, "Cano Reto")
-    #visualizar_rasterizacoes(cano_curvo, "Cano Curvo")
-    #visualizar_rasterizacoes(cilindro, "Cilindro")
-    #visualizar_rasterizacoes(paralelepipedo, "Paralelepípedo")
-    #visualizar_rasterizacoes(linha, "Linha")
