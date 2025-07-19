@@ -103,31 +103,52 @@ def mostrar_cena_camera_3D(objetos, eye, at, up=np.array([0, 1, 0]), mostrar_mal
     fig = plt.figure(figsize=(12, 10))
     ax = fig.add_subplot(111, projection='3d')
 
-    # 1. Usa a nova matriz de visão NUV de utils2.py
+    # 1. Usa a matriz de visão NUV de utils2.py
     M_visao = fgl.matriz_visao(eye, at, up)
     
-    # Extrai a parte de rotação (3x3) da matriz para desenhar os eixos
-    R_nuv = M_visao[:3, :3]
-    n_axis, u_axis, v_axis = R_nuv[0, :], R_nuv[1, :], R_nuv[2, :]
+    # Extrai os eixos da câmera da parte de rotação da matriz
+    n_axis, u_axis, v_axis = M_visao[0, :3], M_visao[1, :3], M_visao[2, :3]
 
     todos_vertices_camera = []
-    for obj, esc, rot_3x3, trans, cor in objetos:
-        # Cria a matriz de modelo para o objeto
+    legend_elements = [] # Inicia a lista de legendas
+
+    for i, (obj, esc, rot_3x3, trans, cor) in enumerate(objetos):
         rot_4x4 = np.eye(4); rot_4x4[:3, :3] = rot_3x3
         M_modelo = fgl.matriz_translacao(*trans) @ rot_4x4 @ fgl.matriz_escala(esc, esc, esc)
         
-        # Pipeline completo: Vertices -> Modelo -> Visão
         v_mundo_transformado = fgl.transformar_pontos(np.array(obj.vertices), M_modelo)
         v_camera = fgl.transformar_pontos(v_mundo_transformado, M_visao)
         todos_vertices_camera.append(v_camera)
         
-        # Lógica de plotagem dos objetos (inalterada)
         if len(obj.faces) > 0:
             mesh = Poly3DCollection(v_camera[np.array(obj.faces)], alpha=0.6, linewidths=0.3 if mostrar_malha else 0, edgecolor='k' if mostrar_malha else 'none', facecolor=cor)
             ax.add_collection3d(mesh)
         else:
             if len(v_camera) == 2: ax.plot(v_camera[:,0], v_camera[:,1], v_camera[:,2], color=cor, linewidth=2, marker='o', markersize=6)
             else: ax.plot(v_camera[:,0], v_camera[:,1], v_camera[:,2], color=cor, linewidth=2)
+        
+        # Adiciona a legenda para cada objeto
+        legend_elements.append(Patch(facecolor=cor, label=f'Obj {i+1}'))
+
+    # --- CÓDIGO ADICIONADO PARA PLOTAR AS ORIGENS ---
+    
+    # A origem da câmera no sistema da câmera é sempre (0,0,0)
+    origem_camera = np.array([0, 0, 0])
+    
+    # A origem do mundo é (0,0,0) no sistema do mundo.
+    # Para saber onde ela está no sistema da câmera, aplicamos a matriz de visão.
+    origem_mundo_na_camera = fgl.transformar_pontos(np.array([[0, 0, 0]]), M_visao)[0]
+    
+    # Plota a origem da câmera (ponto azul)
+    ax.scatter(*origem_camera, color='blue', s=100, label='Origem Câmera (eye)')
+    
+    # Plota a origem do mundo (ponto vermelho)
+    ax.scatter(*origem_mundo_na_camera, color='red', s=100, label='Origem Mundo (0,0,0)')
+    
+    # Plota a linha tracejada conectando as duas origens
+    ax.plot(*zip(origem_camera, origem_mundo_na_camera), 'k--', alpha=0.5, label='Mundo -> Câmera')
+    
+    # --- FIM DO CÓDIGO ADICIONADO ---
 
     # Lógica de ajuste dos limites (inalterada)
     if todos_vertices_camera:
@@ -140,17 +161,15 @@ def mostrar_cena_camera_3D(objetos, eye, at, up=np.array([0, 1, 0]), mostrar_mal
     ax.set_xlim(centro[0]-max_dist, centro[0]+max_dist); ax.set_ylim(centro[1]-max_dist, centro[1]+max_dist); ax.set_zlim(centro[2]-max_dist, centro[2]+max_dist)
     ax.set_title("Objetos no Sistema da Câmera (NUV)")
     
-    # 2. AJUSTE NO DESENHO DOS EIXOS E NAS LEGENDAS
+    # Desenho dos eixos e legendas
     ax.set_xlabel("N (Profundidade)"); ax.set_ylabel("U (Altura)"); ax.set_zlabel("V (Lateral)")
-    
-    # A origem da câmera no sistema da câmera é sempre (0,0,0)
-    origem_camera = np.array([0,0,0])
-    
-    # Desenha os eixos N, U, V a partir da origem da câmera
     ax.quiver(origem_camera[0], origem_camera[1], origem_camera[2], n_axis[0], n_axis[1], n_axis[2], color='blue', length=max_dist/5, label='Eixo N (View Dir)')
     ax.quiver(origem_camera[0], origem_camera[1], origem_camera[2], u_axis[0], u_axis[1], u_axis[2], color='green', length=max_dist/5, label='Eixo U (Up)')
     ax.quiver(origem_camera[0], origem_camera[1], origem_camera[2], v_axis[0], v_axis[1], v_axis[2], color='red', length=max_dist/5, label='Eixo V (Right)')
-    ax.legend()
+    
+    # Combina todas as legendas (objetos + eixos + origens)
+    handles, labels = ax.get_legend_handles_labels()
+    ax.legend(handles + legend_elements, labels + [h.get_label() for h in legend_elements])
     
     plt.tight_layout(); plt.show()
 

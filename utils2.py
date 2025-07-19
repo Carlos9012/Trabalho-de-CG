@@ -177,18 +177,24 @@ def matriz_visao(eye, at, aux=np.array([0, 1, 0])):
 
 def matriz_projecao_perspectiva(fov_graus, aspect_ratio, near, far):
     """
-    Calcula a matriz de projeção em perspectiva 4x4.
+    Calcula a matriz de projeção 4x4 customizada para ser compatível com uma
+    matriz de visão que retorna coordenadas na ordem (N, U, V).
     """
     fov_rad = np.radians(fov_graus)
-    t = np.tan(fov_rad / 2)
-    A = -(far + near) / (far - near)
-    B = -2 * far * near / (far - near)
+    t = np.tan(fov_rad / 2) # Fator de escala para a altura (U)
     
+    # Coeficientes para mapear a profundidade (N) para o intervalo [0, 1]
+    A = far / (far - near)
+    B = - (far * near) / (far - near)
+    
+    # Monta a matriz que remapeia as componentes de N, U, V para X, Y, Z, W
     return np.array([
-        [1 / (aspect_ratio * t), 0,     0,  0],
-        [0,                      1 / t, 0,  0],
-        [0,                      0,     A,  B],
-        [0,                      0,    -1,  0]
+        # Coluna de saída:  X (tela)                 Y (tela)                  Z (buffer)            W (divisão)
+        # ------------------------------------------------------------------------------------------------------------------
+        [0,                       0,                1 / (aspect_ratio * t),        0],  # Mapeia V para a saída X
+        [0,                       1 / t,            0,                             0],  # Mapeia U para a saída Y
+        [A,                       0,                0,                             B],  # Mapeia N para a saída Z
+        [1,                       0,                0,                             0]   # Mapeia N para a saída W
     ])
 
 # ==============================================================================
