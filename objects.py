@@ -1,5 +1,6 @@
 import numpy as np
 import math
+from utils2 import hermite, derivada_hermite
 
 class Cano:
     def __init__(self, raio_externo, comprimento, espessura=0.1, n_segmentos=32, n_cortes=20):
@@ -65,47 +66,45 @@ class Cano:
 
 
 class CanoCurvo:
-    def __init__(self, raio_externo=1.0, comprimento=5.0, espessura=0.2, n_segmentos=32, pontos_controle=None):
+    def __init__(self, raio_externo=1.0, comprimento=5.0, espessura=0.2, n_segmentos=32, geometria_hermite=None):
         self.raio_externo = raio_externo
         self.comprimento = comprimento
         self.espessura = espessura
         self.n_segmentos = n_segmentos
 
-        self.pontos_controle = np.array(pontos_controle or [
-            [0, 0, 0],
-            [comprimento / 3, comprimento / 3, comprimento / 3],
-            [2 * comprimento / 3, -comprimento / 3, 2 * comprimento / 3],
-            [comprimento, 0, comprimento]
-        ])
+        # Define a geometria padrão de Hermite se nenhuma for fornecida
+        if geometria_hermite is None:
+            p1 = np.array([0, 0, 0])
+            p2 = np.array([comprimento, 0, 0])
+            t1 = np.array([comprimento, comprimento, 0]) # Tangente para cima e para frente
+            t2 = np.array([comprimento, -comprimento, 0])# Tangente para baixo e para frente
+            self.geometria_hermite = {'p1': p1, 'p2': p2, 't1': t1, 't2': t2}
+        else:
+            self.geometria_hermite = geometria_hermite
 
         self.vertices, self.faces = self._gerar_malha()
 
-    def _bezier(self, t):
-        return (1 - t) ** 3 * self.pontos_controle[0] + \
-               3 * (1 - t) ** 2 * t * self.pontos_controle[1] + \
-               3 * (1 - t) * t ** 2 * self.pontos_controle[2] + \
-               t ** 3 * self.pontos_controle[3]
-
-    def _derivada_bezier(self, t):
-        return 3 * (1 - t) ** 2 * (self.pontos_controle[1] - self.pontos_controle[0]) + \
-               6 * (1 - t) * t * (self.pontos_controle[2] - self.pontos_controle[1]) + \
-               3 * t ** 2 * (self.pontos_controle[3] - self.pontos_controle[2])
-
     def _gerar_malha(self):
-        vertices = []
-        faces = []
-
+        vertices, faces = [], []
         t_vals = np.linspace(0, 1, self.n_segmentos)
-        pontos = np.array([self._bezier(t) for t in t_vals])
-        tangentes = np.array([self._derivada_bezier(t) for t in t_vals])
 
+        # Extrai a geometria para usar nas funções
+        p1 = self.geometria_hermite['p1']
+        p2 = self.geometria_hermite['p2']
+        t1 = self.geometria_hermite['t1']
+        t2 = self.geometria_hermite['t2']
+
+        # Usando as funções de HERMITE para gerar a curva e as tangentes
+        pontos = hermite(p1, p2, t1, t2, self.n_segmentos)
+        tangentes = np.array([derivada_hermite(p1, p2, t1, t2, t) for t in t_vals])
+
+        # O restante da lógica para construir a malha a partir dos pontos e tangentes é o mesmo
         for ponto, tangente in zip(pontos, tangentes):
             tangente_norm = tangente / np.linalg.norm(tangente)
             aux = np.array([0, 0, 1]) if abs(tangente_norm[0]) > 0.1 or abs(tangente_norm[1]) > 0.1 else np.array([1, 0, 0])
             normal = np.cross(tangente_norm, aux)
             normal = normal / np.linalg.norm(normal)
             binormal = np.cross(tangente_norm, normal)
-
             for j in range(self.n_segmentos):
                 theta = 2 * np.pi * j / self.n_segmentos
                 dir_v = normal * np.cos(theta) + binormal * np.sin(theta)
@@ -115,20 +114,13 @@ class CanoCurvo:
         for i in range(len(t_vals) - 1):
             for j in range(self.n_segmentos):
                 next_j = (j + 1) % self.n_segmentos
-                a0 = i * 2 * self.n_segmentos + 2 * j
-                a1 = a0 + 1
-                b0 = (i + 1) * 2 * self.n_segmentos + 2 * j
-                b1 = b0 + 1
-                c0 = (i + 1) * 2 * self.n_segmentos + 2 * next_j
-                c1 = c0 + 1
-                d0 = i * 2 * self.n_segmentos + 2 * next_j
-                d1 = d0 + 1
-
+                a0, a1 = i * 2 * self.n_segmentos + 2 * j, i * 2 * self.n_segmentos + 2 * j + 1
+                b0, b1 = (i + 1) * 2 * self.n_segmentos + 2 * j, (i + 1) * 2 * self.n_segmentos + 2 * j + 1
+                c0, c1 = (i + 1) * 2 * self.n_segmentos + 2 * next_j, (i + 1) * 2 * self.n_segmentos + 2 * next_j + 1
+                d0, d1 = i * 2 * self.n_segmentos + 2 * next_j, i * 2 * self.n_segmentos + 2 * next_j + 1
                 faces.extend([[a0, b0, c0], [a0, c0, d0], [a1, c1, b1], [a1, d1, c1]])
-                if i == 0:
-                    faces.extend([[a0, d0, a1], [a1, d0, d1]])
-                if i == len(t_vals) - 2:
-                    faces.extend([[b0, b1, c0], [c0, b1, c1]])
+                if i == 0: faces.extend([[a0, d0, a1], [a1, d0, d1]])
+                if i == len(t_vals) - 2: faces.extend([[b0, b1, c0], [c0, b1, c1]])
 
         return np.array(vertices), np.array(faces)
 

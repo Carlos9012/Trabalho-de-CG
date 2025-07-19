@@ -6,13 +6,7 @@ from utils import  plotar, compor_cena_varios, mostrar_cena_camera_3D, projetar_
 
 if __name__ == '__main__':
     cano = Cano(1.0, 5.0, 0.1)
-    cano_curvo = CanoCurvo(0.5, 5.0, 0.1, 24,[
-            [0, 0, 0],
-            [1, 2, 1],
-            [3, -1, 2],
-            [5, 0, 3]
-        ]
-    )
+    cano_curvo = CanoCurvo(0.5, 5.0, 0.1, n_segmentos=32)
     cilindro = Cilindro(1.2, 3.0)
     linha4 = LinhaReta()
     paralelepipedo = Paralelepipedo(largura=4, altura=3, espessura=2, n=4, m=3, l=1)
@@ -49,7 +43,7 @@ if __name__ == '__main__':
     at = np.array([1, 0, 0])       # Ponto de foco
     up = np.array([0, 1, 0])       # Vetor "up"
 
-    #mostrar_cena_camera_3D(objetos, eye, at, up)
+    mostrar_cena_camera_3D(objetos, eye, at, up)
 
     #Q4
     T=1
