@@ -65,3 +65,7 @@ if __name__ == '__main__':
     resolucao = (800, 600)
     cena_raster = rasterizar_cena(objetos, eye, at, up, resolucao)
     visualizar_rasterizacao(cena_raster, resolucao)
+    
+    resolucao = (100, 50)
+    cena_raster = rasterizar_cena(objetos, eye, at, up, resolucao)
+    visualizar_rasterizacao(cena_raster, resolucao)
