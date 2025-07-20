@@ -103,86 +103,107 @@ def mostrar_cena_camera_3D(objetos, eye, at, up=np.array([0, 1, 0]), mostrar_mal
     fig = plt.figure(figsize=(12, 10))
     ax = fig.add_subplot(111, projection='3d')
 
-    # 1. Usa a matriz de visão NUV de utils2.py
     M_visao = fgl.matriz_visao(eye, at, up)
     
-    # Extrai os eixos da câmera da parte de rotação da matriz
+    # Extrai os eixos da câmera
     n_axis, u_axis, v_axis = M_visao[0, :3], M_visao[1, :3], M_visao[2, :3]
 
     todos_vertices_camera = []
-    legend_elements = [] # Inicia a lista de legendas
+    legend_elements = []
 
-    for i, (obj, esc, rot_3x3, trans, cor) in enumerate(objetos):
-        rot_4x4 = np.eye(4); rot_4x4[:3, :3] = rot_3x3
+    for i, (obj, esc, rot, trans, cor) in enumerate(objetos):
+        # Conversão segura para matriz 4x4
+        if rot.shape == (3, 3):
+            rot_4x4 = np.eye(4)
+            rot_4x4[:3, :3] = rot
+        elif rot.shape == (4, 4):
+            rot_4x4 = rot
+        else:
+            raise ValueError(f"Matriz de rotação deve ser 3x3 ou 4x4, recebida {rot.shape}")
+
+        # Matriz de modelo completa
         M_modelo = fgl.matriz_translacao(*trans) @ rot_4x4 @ fgl.matriz_escala(esc, esc, esc)
         
-        v_mundo_transformado = fgl.transformar_pontos(np.array(obj.vertices), M_modelo)
-        v_camera = fgl.transformar_pontos(v_mundo_transformado, M_visao)
+        # Transformação para coordenadas da câmera
+        v_mundo = fgl.transformar_pontos(np.array(obj.vertices), M_modelo)
+        v_camera = fgl.transformar_pontos(v_mundo, M_visao)
         todos_vertices_camera.append(v_camera)
         
+        # Renderização
         if len(obj.faces) > 0:
-            mesh = Poly3DCollection(v_camera[np.array(obj.faces)], alpha=0.6, linewidths=0.3 if mostrar_malha else 0, edgecolor='k' if mostrar_malha else 'none', facecolor=cor)
+            mesh = Poly3DCollection(
+                v_camera[np.array(obj.faces)],
+                alpha=0.6,
+                linewidths=0.3 if mostrar_malha else 0,
+                edgecolor='k' if mostrar_malha else 'none',
+                facecolor=cor
+            )
             ax.add_collection3d(mesh)
         else:
-            if len(v_camera) == 2: ax.plot(v_camera[:,0], v_camera[:,1], v_camera[:,2], color=cor, linewidth=2, marker='o', markersize=6)
-            else: ax.plot(v_camera[:,0], v_camera[:,1], v_camera[:,2], color=cor, linewidth=2)
+            if len(v_camera) == 2:
+                ax.plot(v_camera[:,0], v_camera[:,1], v_camera[:,2], 
+                       color=cor, linewidth=2, marker='o', markersize=6)
+            else:
+                ax.plot(v_camera[:,0], v_camera[:,1], v_camera[:,2], 
+                       color=cor, linewidth=2)
         
-        # Adiciona a legenda para cada objeto
         legend_elements.append(Patch(facecolor=cor, label=f'Obj {i+1}'))
+    
+    # Transforma a origem do mundo (0,0,0) para o sistema da câmera
+    origem_mundo = np.array([0, 0, 0])
+    origem_mundo_camera = fgl.transformar_pontos(np.array([origem_mundo]), M_visao)[0]
+    
+    # Plota a origem do mundo como um ponto vermelho
+    ax.scatter(origem_mundo_camera[0], origem_mundo_camera[1], origem_mundo_camera[2], 
+              color='red', s=100, label='Origem do Mundo')
+    
+    # Plota a origem da câmera (sempre em 0,0,0 no sistema da câmera)
+    ax.scatter(0, 0, 0, color='blue', s=100, label='Origem da Câmera')
+    
+    # Linha conectando as origens
+    ax.plot([0, origem_mundo_camera[0]], 
+           [0, origem_mundo_camera[1]], 
+           [0, origem_mundo_camera[2]], 
+           'k--', alpha=0.5, label='Linha Mundo-Câmera')
 
-    # --- CÓDIGO ADICIONADO PARA PLOTAR AS ORIGENS ---
-    
-    # A origem da câmera no sistema da câmera é sempre (0,0,0)
-    origem_camera = np.array([0, 0, 0])
-    
-    # A origem do mundo é (0,0,0) no sistema do mundo.
-    # Para saber onde ela está no sistema da câmera, aplicamos a matriz de visão.
-    origem_mundo_na_camera = fgl.transformar_pontos(np.array([[0, 0, 0]]), M_visao)[0]
-    
-    # Plota a origem da câmera (ponto azul)
-    ax.scatter(*origem_camera, color='blue', s=100, label='Origem Câmera (eye)')
-    
-    # Plota a origem do mundo (ponto vermelho)
-    ax.scatter(*origem_mundo_na_camera, color='red', s=100, label='Origem Mundo (0,0,0)')
-    
-    # Plota a linha tracejada conectando as duas origens
-    ax.plot(*zip(origem_camera, origem_mundo_na_camera), 'k--', alpha=0.5, label='Mundo -> Câmera')
-    
-    # --- FIM DO CÓDIGO ADICIONADO ---
-
-    # Lógica de ajuste dos limites (inalterada)
+    # Configurações da cena
     if todos_vertices_camera:
         all_v = np.vstack(todos_vertices_camera)
         centro = np.mean(all_v, axis=0)
-        max_dist = np.max(np.linalg.norm(all_v - centro, axis=1)) * 1.5 if all_v.size > 0 else 10.0
+        max_dist = np.max(np.linalg.norm(all_v - centro, axis=1)) * 1.5
     else:
         centro, max_dist = np.array([0,0,0]), 10.0
         
-    ax.set_xlim(centro[0]-max_dist, centro[0]+max_dist); ax.set_ylim(centro[1]-max_dist, centro[1]+max_dist); ax.set_zlim(centro[2]-max_dist, centro[2]+max_dist)
+    ax.set_xlim(centro[0]-max_dist, centro[0]+max_dist)
+    ax.set_ylim(centro[1]-max_dist, centro[1]+max_dist)
+    ax.set_zlim(centro[2]-max_dist, centro[2]+max_dist)
+    
     ax.set_title("Objetos no Sistema da Câmera (NUV)")
+    ax.set_xlabel("N (Profundidade)")
+    ax.set_ylabel("U (Altura)")
+    ax.set_zlabel("V (Lateral)")
     
-    # Desenho dos eixos e legendas
-    ax.set_xlabel("N (Profundidade)"); ax.set_ylabel("U (Altura)"); ax.set_zlabel("V (Lateral)")
-    ax.quiver(origem_camera[0], origem_camera[1], origem_camera[2], n_axis[0], n_axis[1], n_axis[2], color='blue', length=max_dist/5, label='Eixo N (View Dir)')
-    ax.quiver(origem_camera[0], origem_camera[1], origem_camera[2], u_axis[0], u_axis[1], u_axis[2], color='green', length=max_dist/5, label='Eixo U (Up)')
-    ax.quiver(origem_camera[0], origem_camera[1], origem_camera[2], v_axis[0], v_axis[1], v_axis[2], color='red', length=max_dist/5, label='Eixo V (Right)')
-    
-    # Combina todas as legendas (objetos + eixos + origens)
-    handles, labels = ax.get_legend_handles_labels()
-    ax.legend(handles + legend_elements, labels + [h.get_label() for h in legend_elements])
-    
-    plt.tight_layout(); plt.show()
+    plt.tight_layout()
+    plt.show()
 
 def projetar_perspectiva_2d(objetos, eye, at, up=np.array([0, 1, 0]), fov=60, aspect_ratio=1, near=1, far=100, desenhar_faces=True):
     fig, ax = plt.subplots(figsize=(8, 8))
 
-    # SUBSTITUIÇÃO: Calcula as matrizes de Visão e Projeção chamando utils2.py
+    # Calcula as matrizes de Visão e Projeção
     M_visao = fgl.matriz_visao(eye, at, up)
     M_proj = fgl.matriz_projecao_perspectiva(fov, aspect_ratio, near, far)
     
     todos_vertices_2d = []
-    for obj, esc, rot_3x3, trans, cor in objetos:
-        rot_4x4 = np.eye(4); rot_4x4[:3, :3] = rot_3x3
+    for obj, esc, rot, trans, cor in objetos:  # Mudamos o parâmetro de rot_3x3 para rot
+        
+        # Verifica e converte a matriz de rotação para 4x4
+        if rot.shape == (3, 3):
+            rot_4x4 = np.eye(4)
+            rot_4x4[:3, :3] = rot
+        elif rot.shape == (4, 4):
+            rot_4x4 = rot
+        else:
+            raise ValueError(f"Matriz de rotação deve ser 3x3 ou 4x4, recebida {rot.shape}")
         
         # 1. Matriz do Modelo
         M_modelo = fgl.matriz_translacao(*trans) @ rot_4x4 @ fgl.matriz_escala(esc, esc, esc)
@@ -190,33 +211,121 @@ def projetar_perspectiva_2d(objetos, eye, at, up=np.array([0, 1, 0]), fov=60, as
         # 2. Pipeline completo: Modelo -> Visão -> Projeção
         M_final = M_proj @ M_visao @ M_modelo
         
+        # 3. Aplica transformação aos vértices
         v_homog = np.hstack([np.array(obj.vertices), np.ones((len(obj.vertices), 1))])
         v_clip = (M_final @ v_homog.T).T
         
-        # 3. Divisão de Perspectiva para obter NDC
+        # 4. Divisão de Perspectiva para obter NDC
         v_ndc = v_clip[:, :3] / (v_clip[:, [3]] + 1e-8)
         
+        # 5. Extrai coordenadas 2D (ignorando Z)
         v_2d = v_ndc[:, :2]
         todos_vertices_2d.append(v_2d)
         
+        # Renderização
         if len(obj.faces) > 0 and desenhar_faces:
             for face in obj.faces:
                 polygon = plt.Polygon(v_2d[np.array(face)], color=cor, alpha=0.6, linewidth=0.3)
                 ax.add_patch(polygon)
         else:
-            if len(v_2d) == 2: ax.plot(v_2d[:, 0], v_2d[:, 1], color=cor, linewidth=2); ax.scatter(v_2d[:, 0], v_2d[:, 1], color=cor, s=30)
-            else: ax.plot(v_2d[:, 0], v_2d[:, 1], color=cor, linewidth=1); ax.scatter(v_2d[:, 0], v_2d[:, 1], color=cor, s=10)
+            if len(v_2d) == 2:
+                ax.plot(v_2d[:, 0], v_2d[:, 1], color=cor, linewidth=2)
+                ax.scatter(v_2d[:, 0], v_2d[:, 1], color=cor, s=30)
+            else:
+                ax.plot(v_2d[:, 0], v_2d[:, 1], color=cor, linewidth=1)
+                ax.scatter(v_2d[:, 0], v_2d[:, 1], color=cor, s=10)
 
+    # Ajuste dos limites do gráfico
     if todos_vertices_2d:
         all_v = np.vstack(todos_vertices_2d)
-        x_min, y_min = np.min(all_v, axis=0); x_max, y_max = np.max(all_v, axis=0)
-        ax.set_xlim(x_min-0.1, x_max+0.1); ax.set_ylim(y_min-0.1, y_max+0.1)
+        x_min, y_min = np.min(all_v, axis=0)
+        x_max, y_max = np.max(all_v, axis=0)
+        ax.set_xlim(x_min-0.1, x_max+0.1)
+        ax.set_ylim(y_min-0.1, y_max+0.1)
     else:
-        ax.set_xlim(-1, 1); ax.set_ylim(-1, 1)
+        ax.set_xlim(-1, 1)
+        ax.set_ylim(-1, 1)
     
-    ax.set_aspect('equal'); ax.set_title("Projeção Perspectiva 2D"); ax.set_xlabel("x"); ax.set_ylabel("y")
-    plt.grid(True); plt.tight_layout(); plt.show()
+    ax.set_aspect('equal')
+    ax.set_title("Projeção Perspectiva 2D")
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
 
+def rasterizar_cena(objetos, eye, at, up, resolucao):
+    # Extrai largura e altura da resolução
+    largura, altura = resolucao  # Desempacota a tupla
+    aspect_ratio = largura / altura  # Calcula a proporção corretamente
     
+    # Matrizes de visualização
+    M_visao = fgl.matriz_visao(eye, at, up)
+    M_proj = fgl.matriz_projecao_perspectiva(60, aspect_ratio, 1, 100)
     
+    cena_rasterizada = []
     
+    for obj, esc, rot, trans, cor in objetos:
+        # Converter rotação para 4x4 (manuseia tanto 3x3 quanto 4x4)
+        if rot.shape == (3, 3):
+            rot_4x4 = np.eye(4)
+            rot_4x4[:3, :3] = rot
+        elif rot.shape == (4, 4):
+            rot_4x4 = rot
+        else:
+            raise ValueError("Matriz de rotação deve ser 3x3 ou 4x4")
+        
+        # Matriz de modelo completa
+        M_modelo = fgl.matriz_translacao(*trans) @ rot_4x4 @ fgl.matriz_escala(esc, esc, esc)
+        
+        # Transformação completa
+        v_homog = np.hstack([obj.vertices, np.ones((len(obj.vertices), 1))])
+        v_ndc = (M_proj @ M_visao @ M_modelo @ v_homog.T).T
+        v_ndc = v_ndc[:, :3] / v_ndc[:, [3]]  # Divisão perspectiva
+        
+        # Converter para coordenadas de tela
+        v_2d = (v_ndc[:, :2] + 1) * 0.5 * np.array([largura, altura])
+        v_2d = v_2d.astype(int)
+        
+        # Rasterização
+        pixels = []
+        if len(obj.faces) > 0:
+            for face in obj.faces:
+                vertices_face = [v_2d[i] for i in face]
+                pixels.extend(fgl.rasterizar_poligono_scanline(vertices_face))
+        elif len(v_2d) >= 2:  # Para linhas
+            for i in range(len(v_2d) - 1):
+                pixels.extend(fgl.rasterizar_linha_bresenham(v_2d[i], v_2d[i+1]))
+        
+        # Filtrar pixels válidos
+        pixels = [(x, y) for x, y in pixels 
+                 if 0 <= x < largura and 0 <= y < altura]
+        cena_rasterizada.append((pixels, cor))
+    
+    return cena_rasterizada
+
+def visualizar_rasterizacao(cena_raster, resolucao, title="Cena Rasterizada"):
+    # Criar imagem com fundo preto
+    imagem = np.zeros((resolucao[1], resolucao[0], 3))
+    
+    # Mapeamento de cores
+    cores = {
+        'lightblue': [173/255, 216/255, 230/255],  # Azul claro
+        'salmon': [250/255, 128/255, 114/255],     # Salmon
+        'khaki': [240/255, 230/255, 140/255],      # Khaki
+        'red': [1.0, 0.0, 0.0],                    # Vermelho
+        'lightgreen': [144/255, 238/255, 144/255]  # Verde claro
+    }
+    
+    # Preencher com os pixels rasterizados
+    for pixels, cor in cena_raster:
+        cor_rgb = np.array(cores.get(cor, [1, 1, 1]))  # Branco se cor não encontrada
+        for x, y in pixels:
+            if 0 <= x < resolucao[0] and 0 <= y < resolucao[1]:
+                imagem[y, x] = cor_rgb
+    
+    plt.figure(figsize=(10, 8))
+    plt.imshow(imagem)
+    plt.title(title)
+    plt.axis('off')
+    plt.show()

@@ -230,7 +230,7 @@ def transformar_pontos(pontos, matriz_transformacao):
 # ==============================================================================
 
 def rasterizar_linha_bresenham(p1, p2):
-    """Rasteriza uma linha 2D usando o Algoritmo de Bresenham."""
+
     x1, y1 = int(p1[0]), int(p1[1])
     x2, y2 = int(p2[0]), int(p2[1])
     pixels = []
@@ -238,8 +238,9 @@ def rasterizar_linha_bresenham(p1, p2):
     sx = 1 if x1 < x2 else -1
     sy = 1 if y1 < y2 else -1
     trocado = dy > dx
-    if trocado:
-        dx, dy = dy, dx
+
+    if trocado: dx, dy = dy, dx
+    
     p = 2 * dy - dx
     x, y = x1, y1
     for _ in range(dx + 1):
@@ -254,36 +255,34 @@ def rasterizar_linha_bresenham(p1, p2):
     return pixels
 
 def rasterizar_poligono_scanline(vertices):
-    """Rasteriza um polígono 2D usando o Algoritmo Scan-Line."""
     if len(vertices) < 3: return []
     pixels = []
     min_y = int(np.ceil(min(v[1] for v in vertices)))
     max_y = int(np.floor(max(v[1] for v in vertices)))
     edge_table = {y: [] for y in range(min_y, max_y + 1)}
-    num_vertices = len(vertices)
-    for i in range(num_vertices):
-        p1 = vertices[i]
-        p2 = vertices[(i + 1) % num_vertices]
-        if p1[1] > p2[1]: p1, p2 = p2, p1
-        y_min_aresta, y_max_aresta = p1[1], p2[1]
-        if y_min_aresta == y_max_aresta: continue
-        x_na_y_min = p1[0]
-        inclinacao_inversa = (p2[0] - p1[0]) / (p2[1] - p1[1])
-        edge_table[int(np.ceil(y_min_aresta))].append([y_max_aresta, x_na_y_min, inclinacao_inversa])
     
-    active_edge_table = []
+    for i in range(len(vertices)):
+        p1 = vertices[i]
+        p2 = vertices[(i + 1) % len(vertices)]
+        if p1[1] > p2[1]: p1, p2 = p2, p1
+        if p1[1] == p2[1]: continue
+        inclinacao = (p2[0] - p1[0]) / (p2[1] - p1[1])
+        edge_table[int(np.ceil(p1[1]))].append([p2[1], p1[0], inclinacao])
+    
+    active_edges = []
     for y in range(min_y, max_y + 1):
-        for aresta in edge_table[y]:
-            active_edge_table.append(aresta)
-        active_edge_table = [aresta for aresta in active_edge_table if aresta[0] > y]
-        active_edge_table.sort(key=lambda aresta: aresta[1])
-        for i in range(0, len(active_edge_table), 2):
-            if i + 1 < len(active_edge_table):
-                x_inicio = int(np.ceil(active_edge_table[i][1]))
-                x_fim = int(np.floor(active_edge_table[i+1][1]))
-                for x in range(x_inicio, x_fim + 1):
-                    pixels.append((x, y))
-        for aresta in active_edge_table:
-            aresta[1] += aresta[2]
+        active_edges.extend(edge_table.get(y, []))
+        active_edges = [e for e in active_edges if e[0] > y]
+        active_edges.sort(key=lambda e: e[1])
+        
+        for i in range(0, len(active_edges), 2):
+            if i + 1 >= len(active_edges): break
+            x_start = int(np.ceil(active_edges[i][1]))
+            x_end = int(np.floor(active_edges[i+1][1]))
+            pixels.extend((x, y) for x in range(x_start, x_end + 1))
+        
+        for e in active_edges:
+            e[1] += e[2]
+    
     return pixels
 

@@ -1,7 +1,10 @@
 #instalando as dependências necessárias: pip install matplotlib numpy
 import numpy as np
+import utils2 as fgl
+import matplotlib.pyplot as plt
 from objects import Cano, CanoCurvo, Cilindro, LinhaReta, Paralelepipedo
-from utils import  plotar, compor_cena_varios, mostrar_cena_camera_3D, projetar_perspectiva_2d
+from utils import  plotar, compor_cena_varios, mostrar_cena_camera_3D, projetar_perspectiva_2d, rasterizar_cena, visualizar_rasterizacao
+
 
 if __name__ == '__main__':
     cano = Cano(1.0, 5.0, 0.1)
@@ -27,7 +30,7 @@ if __name__ == '__main__':
         (paralelepipedo, T, np.eye(3), np.array([-10,  -10, 0]), 'lightgreen')
     ]
     
-    # compor_cena_varios(objetos, mostrar_malha=True, tam_max=10.0,)
+    #compor_cena_varios(objetos, mostrar_malha=True, tam_max=10.0,)
 
     #Q3
     T = 1
@@ -42,7 +45,7 @@ if __name__ == '__main__':
     at = np.array([1, 0, 0])       # Ponto de foco
     up = np.array([0, 1, 0])       # Vetor "up"
 
-    # mostrar_cena_camera_3D(objetos, eye, at, up)
+    #mostrar_cena_camera_3D(objetos, eye, at, up)
 
     #Q4
     T=1
@@ -55,6 +58,10 @@ if __name__ == '__main__':
     ]
      # Projeção em perspectiva dos mesmos objetos
     eye = np.array([5, 10, 10])    # Câmera posicionada a 15 unidades acima da origem
-    at = np.array([0, 0, 0])  
-    # projetar_perspectiva_2d(objetos, eye, at, desenhar_faces=True)
+    at = np.array([0, 1, 0])  
+    #projetar_perspectiva_2d(objetos, eye, at, fov=60)
 
+    # 5. Função para projetar e rasterizar
+    resolucao = (800, 600)
+    cena_raster = rasterizar_cena(objetos, eye, at, up, resolucao)
+    visualizar_rasterizacao(cena_raster, resolucao)
