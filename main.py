@@ -30,7 +30,7 @@ if __name__ == '__main__':
         (paralelepipedo, T, np.eye(3), np.array([-10,  -10, 0]), 'lightgreen')
     ]
     
-    #compor_cena_varios(objetos, mostrar_malha=True, tam_max=10.0,)
+    compor_cena_varios(objetos, mostrar_malha=True, tam_max=10.0,)
 
     #Q3
     T = 1
@@ -45,7 +45,7 @@ if __name__ == '__main__':
     at = np.array([1, 0, 0])       # Ponto de foco
     up = np.array([0, 1, 0])       # Vetor "up"
 
-    #mostrar_cena_camera_3D(objetos, eye, at, up)
+    mostrar_cena_camera_3D(objetos, eye, at, up)
 
     #Q4
     T=1
