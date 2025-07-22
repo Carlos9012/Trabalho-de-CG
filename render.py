@@ -1,259 +1,377 @@
 """
-render.py  –  Transformações, câmera, projeção e visualização rápida.
-
-Depende de:
-• numpy
-• matplotlib (apenas para debug / visual)
-• utils2.py  (fornecido pelo professor – mantém TODA a álgebra)
+render.py — função show_scene(...)
+Agora com:
+  • cores individuais também no wireframe
+  • parâmetro voxel_size para controle de densidade
 """
 
-from __future__ import annotations
-import traceback
 import numpy as np
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d.art3d import Poly3DCollection, Line3D
-from matplotlib.lines import Line2D
-from matplotlib.collections import PolyCollection
-from matplotlib.widgets import Button
-import matplotlib as mpl
-import utils2 as ut
-from geometry import Mesh
+from mpl_toolkits.mplot3d.art3d import Line3DCollection, Poly3DCollection
+from algebra import apply_transform, camera_R_T, perspective_matrix, project_ndc_to_screen
+
+PALETTE = ["tab:blue", "tab:orange", "tab:green",
+           "tab:red",  "tab:purple", "tab:brown"]
+
+def show_scene(
+    solids, meshes, transforms,
+    show_faces=True,
+    show_wire=False,
+    show_mesh=False,
+    palette=PALETTE,
+):
+    segments_always, segments_cond = [], []   # ← separa linha dos demais
+    facesets = []
+
+    for idx, (name, verts, edges) in enumerate(solids):
+        M       = transforms[name]
+        col     = palette[idx % len(palette)]
+        vw      = apply_transform(verts, M)
+
+        if name == "line":                    # → sempre desenha
+            for i, j in edges:
+                segments_always.append([[vw[i], vw[j]], col])
+            continue                          # não tem faces nem malha
+
+        # wire “condicional”
+        if show_wire:
+            for i, j in edges:
+                segments_cond.append([[vw[i], vw[j]], col])
+
+        # malha / faces
+        mv, mf = next((v, f) for n, v, f in meshes if n == name)
+        if len(mf):
+            mv_w = apply_transform(mv, M)
+            tris = [mv_w[k] for k in mf]
+            facesets.append((tris, col))
+
+    # -------- plot -----------------------------------------------------
+    fig = plt.figure(figsize=(6,6), dpi=100)
+    ax  = fig.add_subplot(111, projection='3d')
+
+    # faces preenchidas
+    if show_faces:
+        for tris, col in facesets:
+            ax.add_collection3d(
+                Poly3DCollection(tris, facecolors=col,
+                                 edgecolors='none', alpha=0.6))
+
+    # malha (arestas dos triângulos)
+    if show_mesh:
+        mesh_lines, mesh_cols = [], []
+        for tris, col in facesets:
+            for a,b,c in tris:
+                mesh_lines += [[a,b],[b,c],[c,a]]
+                mesh_cols  += [col,col,col]
+        if mesh_lines:
+            ax.add_collection3d(
+                Line3DCollection(np.array(mesh_lines),
+                                 colors=mesh_cols, lw=0.6))
+
+    # wireframe: linha (sempre) + demais (condicionais)
+    segs = segments_always + (segments_cond if show_wire else [])
+    if segs:
+        coords = np.array([p for p,_ in segs])
+        cols   = [c for _,c in segs]
+        ax.add_collection3d(Line3DCollection(coords, colors=cols, lw=0.8))
+
+    ax.set_xlim(-10,10); ax.set_ylim(-10,10); ax.set_zlim(-10,10)
+    ax.set_xlabel('X'); ax.set_ylabel('Y'); ax.set_zlabel('Z')
+    ax.set_title('Cena 3-D — faces / wire / malha (linha sempre visível)')
+    plt.tight_layout(); plt.show()
 
 
-# ------------------------------------------------------------------ #
-#  Utilitário: botão de ligar/desligar arestas (malha)               #
-# ------------------------------------------------------------------ #
-def _attach_toggle_edges_button(ax, collections,
-                                initial_label="Ocultar malha"):
+
+
+
+
+def show_camera_scene(
+    solids, meshes, world_xforms,
+    eye, target,
+    fov_y=60, near=1.0, far=10.0,
+    show_faces=True, show_wire=False, show_mesh=False,
+    palette=PALETTE,
+):
     """
-    Botão para alternar a exibição de ARESTAS das superfícies.
-
-    • Poly3DCollection / PolyCollection → muda edgecolor & linewidth
-    • Lines são ignoradas (continuam visíveis)
+    Sistema da CÂMERA:
+      • objetos    (faces, wire, malha)
+      • frustum    (linhas vermelhas)
+      • eye        (vermelho)   e  origem do mundo (amarelo)
     """
-    btn_ax = ax.figure.add_axes([0.83, 0.9, 0.14, 0.065])
-    btn    = Button(btn_ax, initial_label,
-                    color="lightgray", hovercolor="0.8")
 
-    state = {"show": True}
+    R_cam, T_cam, V = camera_R_T(eye, target)
 
-    def toggle(_event):
-        try:
-            state["show"] = not state["show"]
-            btn.label.set_text("Mostrar malha" if not state["show"]
-                               else "Ocultar malha")
+    segments_always, segments_cond = [], []
+    facesets = []
 
-            for c in collections:
-                if isinstance(c, (Poly3DCollection,
-                                  mpl.collections.PolyCollection)):
-                    c.set_edgecolor("k" if state["show"] else "none")
-                    c.set_linewidth(0.4 if state["show"] else 0.0)
-                # linhas (Line3D / Line2D) ficam sempre visíveis
-            ax.figure.canvas.draw_idle()
+    for idx, (name, verts, edges) in enumerate(solids):
+        col = palette[idx % len(palette)]
+        vw  = apply_transform(verts, world_xforms[name])
+        vc  = apply_transform(vw, V)
 
-        except Exception as e:
-            print("\n[Toggle-Malha] Erro inesperado ao alternar malha:")
-            traceback.print_exc()
-
-    btn.on_clicked(toggle)
-    return btn
-
-# ------------------------------------------------------------------ #
-#  Transformações básicas                                            #
-# ------------------------------------------------------------------ #
-
-def model_matrix(scale: float = 1.0,
-                 rotation_4x4: np.ndarray | None = None,
-                 translation: tuple[float, float, float] = (0, 0, 0)) -> np.ndarray:
-    """Cria matriz Model = T · R · S."""
-    s = ut.matriz_escala(scale, scale, scale)
-    t = ut.matriz_translacao(*translation)
-    r = rotation_4x4 if rotation_4x4 is not None else np.eye(4)
-    return t @ r @ s
-
-
-def transform_mesh(mesh: Mesh, M: np.ndarray) -> Mesh:
-    v = ut.transformar_pontos(mesh.vertices, M)
-    return Mesh(v, mesh.faces)
-
-
-# ------------------------------------------------------------------ #
-#  Câmera e projeção                                                 #
-# ------------------------------------------------------------------ #
-
-def view_matrix(eye: np.ndarray,
-                at:  np.ndarray,
-                up:  np.ndarray = np.array([0, 1, 0])) -> np.ndarray:
-    return ut.matriz_visao(eye, at, up)
-
-
-def projection_matrix(fov: float, aspect: float,
-                      near: float = 1.0, far: float = 50.0) -> np.ndarray:
-    return ut.matriz_projecao_perspectiva(fov, aspect, near, far)
-
-
-def project_vertices(vertices: np.ndarray,
-                     M_vp: np.ndarray) -> np.ndarray:
-    """Transforma para clip-space → NDC → 2D (x, y)."""
-    v_h = np.hstack([vertices, np.ones((len(vertices), 1))])
-    v_clip = (M_vp @ v_h.T).T
-    v_ndc = v_clip[:, :3] / (v_clip[:, [3]] + 1e-8)
-    return v_ndc[:, :2]
-
-
-# ------------------------------------------------------------------ #
-#  Vizualização rápida                                               #
-# ------------------------------------------------------------------ #
-
-def plot_scene_3d(
-    meshes: list[Mesh],
-    colors: list[str] | None = None,
-    title: str = "Mundo 3D",
-    show_edges: bool = True,
-    camera_pose: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None,
-    world_origin_cam: np.ndarray | None = None,
-) -> None:
-    """
-    Plota meshes 3-D.
-
-    Parâmetros extras:
-    • camera_pose=(eye, at, up) → desenha vetores N U V e posição da câmera.
-    • world_origin_cam          → ponto (x,y,z) da origem do mundo APÓS
-                                  a transformação pela matriz-view (coordenadas
-                                  da câmera); marcado como bolinha preta.
-    """
-    colors = colors or ["skyblue"] * len(meshes)
-    fig = plt.figure(figsize=(7, 5))
-    ax  = fig.add_subplot(111, projection="3d")
-
-    # ---------- objetos ----------
-    for mesh, c in zip(meshes, colors):
-        if len(mesh.faces):
-            surf = Poly3DCollection(mesh.vertices[mesh.faces],
-                                    facecolor=c, alpha=0.65,
-                                    edgecolor="k" if show_edges else "none",
-                                    linewidths=0.4 if show_edges else 0.0)
-            ax.add_collection3d(surf)
-        else:
-            ax.plot(mesh.vertices[:, 0], mesh.vertices[:, 1], mesh.vertices[:, 2],
-                    color=c, lw=2)
-
-    # ---------- extras ----------
-    if camera_pose is not None:
-        eye, at, up = camera_pose
-        n = (eye - at); n /= np.linalg.norm(n)
-        u = np.cross(up, n); u /= np.linalg.norm(u)
-        v = np.cross(n, u)
-
-        L = 2.0  # comprimento das setas
-        ax.quiver(0, 0, 0,  n[0], n[1], n[2], color="r", length=L, label="n")
-        ax.quiver(0, 0, 0,  u[0], u[1], u[2], color="g", length=L, label="u")
-        ax.quiver(0, 0, 0,  v[0], v[1], v[2], color="cyan", length=L, label="v")
-        ax.scatter(0, 0, 0, color="blue", s=40, label="câmera (0,0,0)")
-
-    if world_origin_cam is not None:
-        ax.scatter(*world_origin_cam, color="k", s=40,
-                   label="Origem (world)")
-
-    # ---------- limites ----------
-    all_v = np.vstack([m.vertices for m in meshes])
-    m = np.max(np.abs(all_v)) * 1.2
-    ax.set_xlim(-m, m); ax.set_ylim(-m, m); ax.set_zlim(-m, m)
-    ax.set_xlabel("X"); ax.set_ylabel("Y"); ax.set_zlabel("Z")
-    ax.set_title(title)
-    if camera_pose is not None or world_origin_cam is not None:
-        ax.legend()
-
-    plt.show()
-
-
-
-def plot_projection_2d(
-    meshes_2d: list["Mesh"],
-    colors: list[str] | None = None,
-    title: str = "Projeção 2D",
-    filled: bool = False,          # << NOVO parâmetro
-    edge_lw: float = 1.0,          # largura da aresta quando filled=True
-    alpha: float = 0.5             # transparência dos preenchidos
-) -> None:
-    """
-    Exibe projeção em 2D.
-
-    • filled=False  →  só as arestas (com `edge_lw` ignorado).
-    • filled=True   →  triângulos preenchidos + contorno fino.
-    """
-    colors = colors or ["k"] * len(meshes_2d)
-    fig, ax = plt.subplots(figsize=(6, 6))
-
-    for mesh, c in zip(meshes_2d, colors):
-        v = mesh.vertices
-        if len(mesh.faces) == 0:
-            # malha-linha
-            ax.plot(v[:, 0], v[:, 1],
-                    color=c, lw=edge_lw if filled else 1.5)
+        if name == "line":
+            for i,j in edges:
+                segments_always.append([[vc[i], vc[j]], col])
             continue
 
-        if filled:
-            # ----- preenchido (scan-line já foi feito em raster, aqui é só plot) -----
-            polys = [v[idx] for idx in mesh.faces]  # lista (N_i, 2)
-            coll = PolyCollection(
-                polys,
-                facecolors=c,
-                edgecolors="k",
-                linewidths=edge_lw,
-                alpha=alpha
+        if show_wire:
+            for i,j in edges:
+                segments_cond.append([[vc[i], vc[j]], col])
+
+        mv, mf = next((v,f) for n,v,f in meshes if n==name)
+        if len(mf):
+            mv_c = apply_transform(apply_transform(mv, world_xforms[name]), V)
+            tris = [mv_c[k] for k in mf]
+            facesets.append((tris, col))
+
+    # ---------- plotagem ----------------------------------------------
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d.art3d import Line3DCollection, Poly3DCollection
+
+    fig = plt.figure(figsize=(6,6), dpi=100)
+    ax  = fig.add_subplot(111, projection='3d')
+
+    # faces preenchidas
+    if show_faces:
+        for tris, col in facesets:
+            ax.add_collection3d(
+                Poly3DCollection(tris, facecolors=col,
+                                 edgecolors='none', alpha=0.6)
             )
-            ax.add_collection(coll)
-        else:
-            # ----- apenas arestas -----
-            for tri in mesh.faces:
-                loop = np.append(tri, tri[0])
-                ax.plot(v[loop, 0], v[loop, 1], color=c, lw=1)
 
-    ax.set_aspect("equal")
-    ax.set_title(title)
-    ax.grid(True)
-    plt.show()
+    # malha (arestas dos triângulos)
+    if show_mesh:
+        mesh_lines, mesh_cols = [], []
+        for tris, col in facesets:
+            for a,b,c in tris:
+                mesh_lines += [[a,b], [b,c], [c,a]]
+                mesh_cols  += [col,col,col]
+        if mesh_lines:
+            ax.add_collection3d(
+                Line3DCollection(np.array(mesh_lines),
+                                 colors=mesh_cols, lw=0.6)
+            )
+
+    segs = segments_always + (segments_cond if show_wire else [])
+    if segs:
+        coords = np.array([p for p,_ in segs])
+        cols   = [c for _,c in segs]
+        ax.add_collection3d(Line3DCollection(coords, colors=cols, lw=0.8))
+
+    # -------- frustum e pontos especiais ------------------------------
+    h_n = 2*np.tan(np.deg2rad(fov_y/2))*near
+    h_f = 2*np.tan(np.deg2rad(fov_y/2))*far
+    w_n = h_n; w_f = h_f
+    cn  = np.array([0,0,-near]); cf = np.array([0,0,-far])
+    N = cn + np.array([[-w_n/2,-h_n/2,0],[ w_n/2,-h_n/2,0],
+                       [ w_n/2, h_n/2,0],[-w_n/2, h_n/2,0]])
+    F = cf + np.array([[-w_f/2,-h_f/2,0],[ w_f/2,-h_f/2,0],
+                       [ w_f/2, h_f/2,0],[-w_f/2, h_f/2,0]])
+    fr = [[np.zeros(3),p] for p in N] + \
+         [[N[i],N[(i+1)%4]] for i in range(4)] + \
+         [[F[i],F[(i+1)%4]] for i in range(4)] + \
+         [[N[i],F[i]] for i in range(4)]
+    ax.add_collection3d(Line3DCollection(np.array(fr), colors='r', lw=1.0))
+
+    world_origin_c = apply_transform(np.array([[0,0,0]]), V)[0]
+    ax.scatter(0,0,0,               color='red',    s=50, label='Camera')
+    ax.scatter(*world_origin_c,     color='yellow', s=40, label='World 0')
+
+    lim = far
+    ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim); ax.set_zlim(-lim, 0)
+    ax.set_xlabel('Xc'); ax.set_ylabel('Yc'); ax.set_zlabel('Zc')
+    ax.set_title('Espaço da CÂMERA')
+    ax.legend()
+    plt.tight_layout(); plt.show()
     
     
     
-# ------------------------------------------------------------------ #
-#  Plotar objetos isolados                                           #
-# ------------------------------------------------------------------ #
-def plot_objects_isolated(meshes: list[Mesh],
-                          colors: list[str] | None = None,
-                          title: str = "Objetos – sistema local") -> None:
-    """
-    Plota cada mesh na origem (sem transformações).
-    Todos os objetos no mesmo subplot (afastados em X para visual).
-    """
-    colors = colors or ["skyblue"] * len(meshes)
-    fig = plt.figure(figsize=(7, 5))
-    fig.subplots_adjust(left=0.07, right=0.80, top=0.95, bottom=0.05)
-    ax = fig.add_subplot(111, projection="3d")
-    coll = []
+    
+    
+    
+    
+    
+def show_projection_scene(
+    solids, meshes, world_xforms,
+    eye, target,
+    fov_y=60, near=1.0, far=10.0,
+    img_size=(800, 800),
+    show_faces=False, show_wire=True, show_mesh=False,
+    palette=None,
+):
+    if palette is None:
+        palette = ["tab:blue", "tab:orange", "tab:green",
+                   "tab:red",  "tab:purple", "tab:brown"]
 
-    offset = 0.0
-    gap    = 4.0  # distância entre objetos
-    for mesh, c in zip(meshes, colors):
-        verts = mesh.vertices.copy()
-        verts[:, 0] += offset       # desloca no X
-        offset += gap
+    _, _, V = camera_R_T(eye, target)
+    aspect  = img_size[0] / img_size[1]
+    P       = perspective_matrix(fov_y, aspect, near, far)
 
-        if len(mesh.faces):
-            pc = Poly3DCollection(verts[mesh.faces],
-                                  facecolor=c, alpha=0.65,
-                                  edgecolor="k", linewidths=0.4)
-            ax.add_collection3d(pc)
-            coll.append(pc)
-        else:
-            line, = ax.plot(verts[:,0], verts[:,1], verts[:,2],
-                            color=c, lw=2)
-            coll.append(line)
+    fig, ax = plt.subplots(figsize=(img_size[0]/100, img_size[1]/100), dpi=100)
+    ax.set_xlim(0, img_size[0]); ax.set_ylim(img_size[1], 0)
+    ax.set_aspect('equal'); ax.axis('off')
 
-    ax.set_box_aspect([offset, gap, gap])
-    ax.set_title(title)
-    _attach_toggle_edges_button(ax, coll,
-                                initial_label="Ocultar malha")
-    plt.show()
+    for idx, (name, verts, edges) in enumerate(solids):
+        col = palette[idx % len(palette)]
+        M   = P @ V @ world_xforms[name]
 
+        # -------- vértices em clip space -------------------------------
+        v_h   = np.hstack([verts, np.ones((len(verts), 1))])      # (N,4)
+        clip  = (M @ v_h.T).T
+        w     = clip[:, 3]
+
+        # mantêm só pontos dentro do cubo NDC
+        ndc   = clip[:, :3] / w[:, None]
+        in_ndc = (w > 0) & (np.abs(ndc[:,0]) <= 1) & \
+                 (np.abs(ndc[:,1]) <= 1) & (np.abs(ndc[:,2]) <= 1)
+
+        if not in_ndc.any():
+            continue
+
+        screen = np.empty((len(verts), 2))
+        screen[in_ndc] = project_ndc_to_screen(ndc[in_ndc, :2], *img_size)
+        idx_scr = {old: new for new, old in enumerate(np.where(in_ndc)[0])}
+
+        # -------- LINHA (sempre mostrada) ------------------------------
+        if name == "line":
+            for i, j in edges:
+                if in_ndc[i] and in_ndc[j]:
+                    p, q = idx_scr[i], idx_scr[j]
+                    ax.plot([screen[p,0], screen[q,0]],
+                            [screen[p,1], screen[q,1]],
+                            color=col, lw=1)
+            continue
+
+        # -------- wireframe lógico ------------------------------------
+        if show_wire:
+            for i, j in edges:
+                if in_ndc[i] and in_ndc[j]:
+                    p, q = idx_scr[i], idx_scr[j]
+                    ax.plot([screen[p,0], screen[q,0]],
+                            [screen[p,1], screen[q,1]],
+                            color=col, lw=1)
+
+        # -------- faces / malha ---------------------------------------
+        if name != "line" and (show_faces or show_mesh):
+            mv, mf = next((v, f) for n, v, f in meshes if n == name)
+            mv_h   = np.hstack([mv, np.ones((len(mv),1))])
+            clip_m = (M @ mv_h.T).T
+            w_m    = clip_m[:,3]
+
+            ndc_m  = clip_m[:, :3] / w_m[:, None]
+            in_m   = (w_m > 0) & (np.abs(ndc_m[:,0]) <= 1) & \
+                     (np.abs(ndc_m[:,1]) <= 1) & (np.abs(ndc_m[:,2]) <= 1)
+            if not in_m.any():
+                continue
+
+            scr_m = project_ndc_to_screen(ndc_m[in_m,:2], *img_size)
+            idx_scr_m = {old:new for new,old in enumerate(np.where(in_m)[0])}
+
+            for a, b, c in mf:
+                if not (in_m[a] and in_m[b] and in_m[c]):
+                    continue
+                pa, pb, pc = idx_scr_m[a], idx_scr_m[b], idx_scr_m[c]
+
+                if show_faces:
+                    ax.fill([scr_m[pa,0], scr_m[pb,0], scr_m[pc,0]],
+                            [scr_m[pa,1], scr_m[pb,1], scr_m[pc,1]],
+                            facecolor=col, edgecolor='none', alpha=0.3)
+
+                if show_mesh:
+                    ax.plot([scr_m[pa,0], scr_m[pb,0]],
+                            [scr_m[pa,1], scr_m[pb,1]],
+                            color=col, lw=0.6)
+                    ax.plot([scr_m[pb,0], scr_m[pc,0]],
+                            [scr_m[pb,1], scr_m[pc,1]],
+                            color=col, lw=0.6)
+                    ax.plot([scr_m[pc,0], scr_m[pa,0]],
+                            [scr_m[pc,1], scr_m[pa,1]],
+                            color=col, lw=0.6)
+
+    ax.set_title('Projeção em perspectiva 2-D (clipped em NDC)')
+    plt.tight_layout(); plt.show()
+    
+    
+    
+    
+    
+# ----------------------------------------------------------------------
+# Rasterização rápida usando Pillow (polígonos + linhas)
+# ----------------------------------------------------------------------
+from PIL import Image, ImageDraw
+import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
+
+def _rgb(color):            # cor matplotlib -> (R,G,B)
+    r,g,b,_ = mcolors.to_rgba(color)
+    return int(r*255), int(g*255), int(b*255)
+
+def rasterize_projection_scene(
+    solids, meshes, world_xforms,
+    eye, target,
+    fov_y=60, near=1.0, far=10.0,
+    resolutions=(256, 512, 1024),
+    palette=PALETTE,
+):
+    _, _, V = camera_R_T(eye, target)
+    P       = perspective_matrix(fov_y, 1.0, near, far)
+
+    # ---------------- pré-projeção de TODOS os vértices ----------------
+    proj_cache = {}   # (name) -> dict{ 'verts': scr_xy , 'mask': in_NDC }
+    for name, verts, _ in solids:
+        M     = P @ V @ world_xforms[name]
+        vh    = np.hstack([verts, np.ones((len(verts),1))])
+        clip  = (M @ vh.T).T
+        w     = clip[:,3]
+        ndc   = clip[:,:3] / w[:,None]
+        mask  = (w>0) & (np.abs(ndc)<=1).all(axis=1)
+        proj_cache[name] = {'ndc':ndc, 'mask':mask}
+
+    # ------------------------- por resolução ---------------------------
+    for res in resolutions:
+        img   = Image.new("RGB", (res, res), (255,255,255))
+        draw  = ImageDraw.Draw(img)
+
+        for idx, (name, verts, edges) in enumerate(solids):
+            col  = palette[idx % len(palette)]
+            rgb  = _rgb(col)
+            ndc  = proj_cache[name]['ndc']
+            mask = proj_cache[name]['mask']
+            if not mask.any():     # nada visível nesta primitiva
+                continue
+
+            scr = project_ndc_to_screen(ndc[mask,:2], res, res)
+            idx_scr = {old:new for new,old in enumerate(np.where(mask)[0])}
+
+            # ------ linha (sempre) ------------------------------------
+            if name == "line":
+                for i,j in edges:
+                    if mask[i] and mask[j]:
+                        p,q = scr[idx_scr[i]], scr[idx_scr[j]]
+                        draw.line((*p, *q), fill=rgb) #brensenham
+                continue
+
+            # ------ faces da malha ------------------------------------
+            mv, mf = next((v,f) for n,v,f in meshes if n==name)
+            mvh    = np.hstack([mv, np.ones((len(mv),1))])
+            clip_m = (P @ V @ world_xforms[name] @ mvh.T).T
+            w_m    = clip_m[:,3]
+            ndc_m  = clip_m[:,:3] / w_m[:,None]
+            ok     = (w_m>0) & (np.abs(ndc_m)<=1).all(axis=1)
+            if not ok.any(): continue
+            scr_m  = project_ndc_to_screen(ndc_m[ok,:2], res, res)
+            idxm   = {old:new for new,old in enumerate(np.where(ok)[0])}
+
+            for a,b,c in mf:
+                if ok[a] and ok[b] and ok[c]:
+                    pa,pb,pc = scr_m[idxm[a]], scr_m[idxm[b]], scr_m[idxm[c]]
+                    draw.polygon([tuple(pa),tuple(pb),tuple(pc)], fill=rgb) #scan line
+
+        fname = f"raster_{res}.png"
+        img.save(fname);   print(f"[OK] {fname} salvo.")
+
+        # ---------- mostra na tela ------------------------------------
+        plt.figure(figsize=(res/100, res/100), dpi=100)
+        plt.imshow(img); plt.axis('off')
+        plt.title(f"Raster {res}×{res}")
+        plt.tight_layout(); plt.show()

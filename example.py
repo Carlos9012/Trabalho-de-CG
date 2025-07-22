@@ -1,106 +1,88 @@
 """
-example.py – Demonstração completa dos itens 1-5 do Trabalho.
-
-• Modela todos os sólidos pedidos;
-• Monta cena (coordenadas do mundo, sem intersecção);
-• Converte p/ sistema da câmera, mostra origem do mundo;
-• Projeta em perspectiva (arestas coloridas);
-• Rasteriza em 3 resoluções diferentes.
+example.py  –  pipeline completo
 """
 
-import numpy as np, matplotlib.pyplot as plt
-import render as rd, raster
-import window as win
-from geometry import (box, cylinder, line,
-                      pipe_straight, pipe_curved, Mesh)
+import numpy as np
+from geometry import (
+    create_line, create_cylinder, create_pipe_straight,
+    create_box,  create_pipe_curved,
+)
+from meshing import generate_mesh
+from algebra  import translate, rot_x, rot_y, rot_z, scale, apply_transform
+import render
 
-# ------------------------------------------------------------------ #
-# 1) modelagem dos sólidos                                           #
-# ------------------------------------------------------------------ #
-solids   = [
-    pipe_straight(radius=0.6, length=4.0, thickness=0.15),
-    pipe_curved (radius=0.4, p1=(0,0,0), p2=(3,2,2),
-                 t1=(3,0,0), t2=(0,3,0)),
-    cylinder    (radius=0.8, height=2.5),
-    box         (1.8, 1.2, 1.2),
-    line        ((0,0,0), (0,0,4))
-]
-colors = ["cornflowerblue", "orange", "limegreen",
-          "magenta", "red"]            # cor única por sólido
+def main(show_faces=True, show_wire=True, show_mesh=True):
 
-#rd.plot_objects_isolated(solids, colors, title="Objetos isolados (sistema local)")
+    # ---------- 1. Sólidos locais --------------------------------------
+    solids = [
+        ("cylinder",      *create_cylinder(1.0, 2.0)),
+        ("pipe_straight", *create_pipe_straight(0.5, 4.0)),
+        ("box",           *create_box(2.0, 2.0, 2.0)),
+    ]
+    solids.append(("pipe_curved",
+                   *create_pipe_curved(0.5, (0,0,0), (4,4,0), (4,0,0), (0,4,0))))
+    solids.append(("line", *create_line(4.0)))          # wireframe only
 
-# ------------------------------------------------------------------ #
-# 2) composição da cena (mundo)                                      #
-# ------------------------------------------------------------------ #
-T = [(-4,0,0),(4,0,0),(0,0,0),(0,5,3.5),(0,-4,0)]
-world_meshes: list[Mesh] = []
-for m,trans in zip(solids, T):
-    M = rd.model_matrix(scale=1.0, translation=trans)
-    world_meshes.append(rd.transform_mesh(m, M))
+    # ---------- 2. Mesh --------------------------------------
+    meshes = []
+    for name, verts, edges in solids:
+        if name == "line":
+            continue
+        mesh_v, mesh_f = generate_mesh(name, verts, edges)
+        meshes.append((name, mesh_v, mesh_f))
 
-# exibe cena em 3D (mundo) + origem
-#rd.plot_scene_3d(world_meshes, colors, "Mundo 3D")
-# ------------------------------------------------------------------ #
-# 3) câmera – transforma p/ coords da câmera e mostra                #
-# ------------------------------------------------------------------ #
-eye = np.array([8, 6, 6])
-at  = np.array([0, 0, 0])
-up  = np.array([0, 1, 0])
+    # ---------- 3. Transformações (posição final no mundo) ------------
+    deg = np.deg2rad
+    transforms = {
+        "cylinder"     : translate(-4,  0, 0) @ scale(.8,.8,.8),
+        "pipe_straight": translate( 0, -4, 0) @ rot_y(deg(90)) @ scale(.8,.8,.8),
+        "box"          : translate( 4,  0, 0) @ rot_z(deg(45)) @ scale(.7,.7,.7),
+        "pipe_curved"  : translate( 0,  3, -4) @ rot_x(deg(-30)) @ scale(.5,.5,.5),
+        "line"         : translate( 0,  0, 4) @ rot_z(deg(30)) @ scale(.8,.8,.8),
+    }
 
-V = rd.view_matrix(eye, at, up)
-origin_world_cam = (V @ np.array([0, 0, 0, 1])).flatten()[:3]
-cam_meshes = [rd.transform_mesh(m, V) for m in world_meshes]
-#rd.plot_scene_3d(
-#    cam_meshes, colors,
-#    title="Sistema da Câmera (3D)",
-#    camera_pose=(np.zeros(3), at-eye, up),   # eye==0 no espaço da câmera
-#    world_origin_cam=origin_world_cam
-#)
+    # ---------- 4. Bounding-box global → eye & target ------------------
+    all_world = []
+    for name, verts, _ in solids:
+        vw = apply_transform(verts, transforms[name])  # world vertices
+        all_world.append(vw)
+    all_world = np.vstack(all_world)
 
-# coloca ponto para origem do mundo (vermelho) no último plot
-# (apenas estilístico – não necessário em relatório)
+    bb_min, bb_max = all_world.min(0), all_world.max(0)
+    target = (bb_min + bb_max) / 2.0                  # centro dos objetos
+    eye    = bb_max + np.array([2, 2, 2])             # canto “superior”
 
-# ------------------------------------------------------------------ #
-# 4) Projeção em perspectiva (2D)                                    #
-# ------------------------------------------------------------------ #
-P = rd.projection_matrix(fov=80, aspect=1.0, near=1, far=50)
-M_vp = P @ np.eye(4)            # projec. após V já foi aplicada
-proj_meshes = [Mesh(rd.project_vertices(m.vertices, P),
-                    m.faces) for m in cam_meshes]
-
-#rd.plot_projection_2d(proj_meshes, colors, "Projeção 2D – Arestas")
+    dist = np.linalg.norm(eye - target)
+    near = max(0.1, dist * 0.05)         # 5 % da distância
+    far  = dist + 5                      # folga extra
 
 
-#rd.plot_projection_2d(proj_meshes, colors, "Projeção 2D - Filled", filled=True)
-
-# ------------------------------------------------------------------ #
-# 5) Rasterização em 3 resoluções                                    #
-# ------------------------------------------------------------------ #
-sizes = [120, 240, 960]
-#fig, axes = plt.subplots(1, len(sizes), figsize=(12,4))
-#for ax, sz in zip(axes, sizes):
-#    fb = raster.rasterize_scene(world_meshes, P@V, sz, sz)
-#    ax.imshow(fb, cmap="gray"); ax.set_title(f"{sz}x{sz}")
-#    ax.axis("off")
-#plt.suptitle("Rasterização (Scan-line) em 3 resoluções")
-#plt.tight_layout(); plt.show()
 
 
-objetos = [
-    pipe_straight(radius=0.6, length=4.0, thickness=0.15),
-    pipe_curved (radius=0.4, p1=(0,0,0), p2=(3,2,2), t1=(3,0,0), t2=(0,3,0)),
-    cylinder    (radius=0.8, height=2.5),
-    box         (1.8, 1.2, 1.2),
-    line        ((0,0,0), (0,0,4))
-]
+    # ---------- 5. Visualizações --------------------------------------
+    render.show_scene(solids, meshes, transforms,
+                      show_faces=show_faces, show_wire=show_wire, show_mesh=show_mesh)
 
-eye = [5, 5, 5]
-at = [0, 0, 0]
-up = [0, 1, 0]
-fov = 60
-aspect_ratio = 1.0
-near = 1.0
-far = 12.0
 
-win.desenhar_cena(objetos, eye, at, up, fov, aspect_ratio, near, far)
+    render.show_camera_scene(
+        solids, meshes, transforms,
+        eye=eye, target=target,
+        fov_y=60, near=near, far=far,    # ← usa valores auto
+        show_faces=True, show_wire=False, show_mesh=False,
+    )
+    render.show_projection_scene(
+        solids, meshes, transforms,
+        eye=eye, target=target,
+        fov_y=60, near=near, far=far,    # ← idem
+        show_faces=True, show_wire=False, show_mesh=False,
+    )
+    
+    render.rasterize_projection_scene(
+        solids, meshes, transforms,
+        eye=eye, target=target,
+        fov_y=60, near=near, far=far
+    )
+
+if __name__ == "__main__":
+    main(show_faces=True, show_wire=False, show_mesh=True)
+

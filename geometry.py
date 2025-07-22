@@ -1,155 +1,203 @@
 """
-geometry.py – Sólidos/objetos exigidos no trabalho.
+geometry.py
+Modelagem de sólidos retornando **apenas vertices e edges**.
 
-• Retorna Mesh(vertices, faces) com índices 0-based.
-• Usa apenas numpy + math; sem libs externas.
+Primitivas disponíveis
+----------------------
+create_line           – reta de tamanho 4 (default)
+create_cylinder       – cilindro (tampado ou oco)
+create_pipe_straight  – cano reto (cilindro oco)
+create_box            – paralelepípedo (hiper-retângulo)
+create_pipe_curved    – cano curvo via Hermite
+
+Cada função retorna:
+    vertices : np.ndarray  (N, 3)
+    edges    : list[tuple[int, int]]
+              (arestas únicas, índices ordenados)
 """
 
 from __future__ import annotations
-import numpy as np, math
-from dataclasses import dataclass
-import utils2 as ut                    # para curva Hermite
+import numpy as np
+from typing import Tuple, List
+from algebra import hermite_curve, normalize
 
-# ------------------------------------------------------------------ #
-#  Estrutura base                                                    #
-# ------------------------------------------------------------------ #
-@dataclass
-class Mesh:
-    vertices: np.ndarray   # (N,3)
-    faces:    np.ndarray   # (M,3)  — vazio se é linha
+# ---------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------
 
-    def copy(self) -> "Mesh":
-        return Mesh(self.vertices.copy(), self.faces.copy())
+def _add_edge(edge_set: set, a: int, b: int):
+    """Adiciona aresta (a,b) ao set, já ordenada para evitar duplicatas."""
+    edge_set.add((a, b) if a < b else (b, a))
 
+def _ring_vertices(radius, angle):
+    """Retorna coordenadas (x,y) de um anel no plano XY."""
+    return np.column_stack([np.cos(angle)*radius, np.sin(angle)*radius])
 
-# ------------------------------------------------------------------ #
-#  Objetos simples já existentes                                     #
-# ------------------------------------------------------------------ #
-def box(lx=2.0, ly=1.0, lz=1.0) -> Mesh:
-    """Paralelepípedo com 8 vértices, 12 triângulos."""
-    x, y, z = lx / 2, ly / 2, lz / 2
-    v = np.array([(-x,-y,-z),( x,-y,-z),( x, y,-z),(-x, y,-z),
-                  (-x,-y, z),( x,-y, z),( x, y, z),(-x, y, z)])
-    f = np.array([(0,1,2),(0,2,3),(4,6,5),(4,7,6),
-                  (0,4,5),(0,5,1),(1,5,6),(1,6,2),
-                  (2,6,7),(2,7,3),(3,7,4),(3,4,0)])
-    return Mesh(v,f)
+def _frenet_frame(tangent: np.ndarray):
+    tangent = normalize(tangent)
+    ref     = np.array([0,0,1]) if abs(tangent[2]) < .9 else np.array([0,1,0])
+    normal  = normalize(np.cross(tangent, ref))
+    binorm  = np.cross(tangent, normal)
+    return normal, binorm
 
+# ---------------------------------------------------------------------
+# Primitivas
+# ---------------------------------------------------------------------
 
-def cylinder(radius=1.0, height=4.0,
-             n_segments=20, n_layers=1) -> Mesh:
-    """Cilindro fechado (tampas + laterais)."""
-    verts, faces = [], []
-    # anéis
-    for k in range(n_layers+1):
-        z = height*k/n_layers
-        for i in range(n_segments):
-            t = 2*math.pi*i/n_segments
-            verts.append((radius*math.cos(t), radius*math.sin(t), z))
-    # tampas (centros)
-    idx_base, idx_top = len(verts), len(verts)+1
-    verts += [(0,0,0),(0,0,height)]
+def create_line(
+    length: float = 4.0,
+    origin: Tuple[float, float, float] = (0,0,0),
+    direction: Tuple[float, float, float] = (1,0,0),
+):
+    """Reta simples com 2 vértices."""
+    origin    = np.asarray(origin, float)
+    direction = normalize(direction)
+    vertices  = np.stack([origin, origin + direction*length])
+    edges     = [(0,1)]
+    return vertices, edges
 
-    for k in range(n_layers):
-        o0, o1 = k*n_segments, (k+1)*n_segments
-        for i in range(n_segments):
-            j = (i+1)%n_segments
-            a,b,c,d = o0+i, o0+j, o1+j, o1+i
-            faces += [(a,b,c),(a,c,d)]               # lateral
-            if k==0:   faces.append((idx_base,b,a))  # tampa base
-            if k==n_layers-1: faces.append((idx_top,d,c))  # tampa topo
-    return Mesh(np.asarray(verts,float), np.asarray(faces,int))
+# ---------- Cilindro / Cano reto ---------- #
 
-
-def line(p0:tuple[float,float,float],
-         p1:tuple[float,float,float]) -> Mesh:
-    """Linha (dois vértices, sem faces)."""
-    return Mesh(np.array([p0,p1],float), np.empty((0,3),int))
-
-
-# ------------------------------------------------------------------ #
-#  Cano reto  (≈ cilindro “oco”)                                     #
-# ------------------------------------------------------------------ #
-def pipe_straight(radius=1.0, length=4.0,
-                  thickness=0.2,
-                  n_segments=20) -> Mesh:
+def create_cylinder(
+    radius: float,
+    height: float,
+    radial_segments: int = 32,
+    height_segments: int = 1,
+    origin: Tuple[float,float,float] = (0,0,0),
+    cap_ends: bool = True,
+):
     """
-    Gera cano reto com parede de ‘thickness’.
-    • Duas superfícies: externa (raio R) e interna (R-th).
+    Cilindro sólido (cap_ends=True) ou oco (False).
+    Retorna apenas vertices e edges (sem faces).
     """
-    R_out, R_in = radius, max(radius-thickness, 1e-3)
-    verts, faces = [], []
-    # anéis externos + internos (0-segms = z0, segms = z1)
-    for r in (R_out, R_in):
-        for z in (0.0, length):
-            for i in range(n_segments):
-                t = 2*math.pi*i/n_segments
-                verts.append((r*math.cos(t), r*math.sin(t), z))
-    # índices auxiliares
-    ext0 = 0
-    ext1 = n_segments
-    int0 = 2*n_segments
-    int1 = 3*n_segments
-    # laterais externa + interna
-    for ring_a, ring_b in ((ext0,ext1),(int1,int0)):  # obs ordem p/face interna invertida
-        for i in range(n_segments):
-            j=(i+1)%n_segments
-            a,b,c,d = ring_a+i, ring_a+j, ring_b+j, ring_b+i
-            faces += [(a,b,c),(a,c,d)]
-    # tampas (une ext -> int)
-    for ring_e, ring_i in ((ext0,int0),(ext1,int1)):
-        for i in range(n_segments):
-            j=(i+1)%n_segments
-            faces += [(ring_e+i, ring_i+i, ring_i+j),
-                      (ring_e+i, ring_i+j, ring_e+j)]
-    return Mesh(np.asarray(verts,float), np.asarray(faces,int))
+    ox, oy, oz = origin
+    angle      = np.linspace(0, 2*np.pi, radial_segments, endpoint=False)
+    z_vals     = np.linspace(0, height, height_segments+1)
 
+    # Gera vértices anel-a-anel
+    verts_xy   = _ring_vertices(radius, angle)          # (radial,2)
+    vertices   = []
+    for z in z_vals:
+        ring = np.column_stack([verts_xy,
+                                np.full(radial_segments, oz+z)])
+        ring[:,0] += ox
+        ring[:,1] += oy
+        vertices.append(ring)
+    vertices = np.vstack(vertices)                      # ((h+1)*radial,3)
 
-# ------------------------------------------------------------------ #
-#  Cano curvo  (extrusão em curva Hermite)                           #
-# ------------------------------------------------------------------ #
-def pipe_curved(radius=1.0,
-                p1=(0,0,0), p2=(4,4,0),
-                t1=(4,0,0), t2=(0,4,0),
-                n_curve=24, n_circle=16) -> Mesh:
-    """
-    Extrusa um círculo de raio ‘radius’ ao longo de uma curva de Hermite.
-    • p1,p2 – pontos; t1,t2 – tangentes (mesma convenção do prof.).
-    """
-    # 1. pontos da curva
-    C = ut.hermite(np.array(p1), np.array(p2),
-                   np.array(t1), np.array(t2),
-                   num_pontos=n_curve)
-    verts, faces = [], []
-    up_ref = np.array([0,0,1])
+    edge_set: set[tuple[int,int]] = set()
+    rings = height_segments+1
 
-    def frame(i:int):
-        """Retorna vetores (t,u,v) ortonormais para anel i."""
-        if i==len(C)-1: a=C[i]-C[i-1]
-        else:           a=C[i+1]-C[i]
-        t = ut.normalizar_vetor(a)
-        # evita colinearidade escolhendo outro vetor de referência
-        if abs(np.dot(t, up_ref))>0.9:
-            up = np.array([0,1,0])
-        else: up = up_ref
-        v = ut.normalizar_vetor(np.cross(t, up))
-        u = np.cross(v, t)
-        return t,u,v
+    # Arestas ao longo da circunferência
+    for r in range(rings):
+        base = r*radial_segments
+        for i in range(radial_segments):
+            _add_edge(edge_set, base+i,
+                                base+((i+1)%radial_segments))
 
-    # 2. gera anéis
-    for i,center in enumerate(C):
-        _,u,v = frame(i)
-        for k in range(n_circle):
-            ang = 2*math.pi*k/n_circle
-            pt = center + radius*math.cos(ang)*u + radius*math.sin(ang)*v
-            verts.append(tuple(pt))
+    # Arestas verticais
+    for r in range(rings-1):
+        base, nxt = r*radial_segments, (r+1)*radial_segments
+        for i in range(radial_segments):
+            _add_edge(edge_set, base+i, nxt+i)
 
-    # 3. faces entre anéis
-    for i in range(n_curve-1):
-        off0, off1 = i*n_circle, (i+1)*n_circle
-        for k in range(n_circle):
-            j=(k+1)%n_circle
-            a,b,c,d = off0+k, off0+j, off1+j, off1+k
-            faces += [(a,b,c),(a,c,d)]
-    # 4. tampas (opcional: não exigido no enunciado)
-    return Mesh(np.asarray(verts,float), np.asarray(faces,int))
+    # Tampas (opcional) – arestas entre centro e anel
+    if cap_ends:
+        # fundo
+        center_bot = len(vertices)
+        vertices = np.vstack([vertices, [ox, oy, oz]])
+        for i in range(radial_segments):
+            _add_edge(edge_set, center_bot, i)
+        # topo
+        center_top = len(vertices)
+        vertices = np.vstack([vertices, [ox, oy, oz+height]])
+        top_base  = (rings-1)*radial_segments
+        for i in range(radial_segments):
+            _add_edge(edge_set, center_top, top_base+i)
+
+    edges = sorted(edge_set)
+    return vertices, edges
+
+def create_pipe_straight(
+    radius: float,
+    length: float,
+    radial_segments: int = 32,
+    length_segments: int = 1,
+    origin: Tuple[float,float,float] = (0,0,0),
+):
+    """Cano reto (cilindro sem tampas)."""
+    return create_cylinder(
+        radius, length, radial_segments,
+        length_segments, origin, cap_ends=False
+    )
+
+# ---------- Paralelepípedo ---------- #
+
+def create_box(
+    width: float,
+    depth: float,
+    height: float,
+    origin: Tuple[float,float,float] = (0,0,0),
+):
+    """Caixa eixo-alinhada."""
+    ox, oy, oz = origin
+    # 8 vértices
+    vertices = np.array(
+        [[ox,         oy,          oz         ],  # 0
+         [ox+width,   oy,          oz         ],  # 1
+         [ox+width,   oy+depth,    oz         ],  # 2
+         [ox,         oy+depth,    oz         ],  # 3
+         [ox,         oy,          oz+height ],  # 4
+         [ox+width,   oy,          oz+height ],  # 5
+         [ox+width,   oy+depth,    oz+height ],  # 6
+         [ox,         oy+depth,    oz+height ]], # 7
+        float,
+    )
+
+    # 12 arestas
+    edges = [(0,1),(1,2),(2,3),(3,0),  # base
+             (4,5),(5,6),(6,7),(7,4),  # topo
+             (0,4),(1,5),(2,6),(3,7)]  # colunas
+    return vertices, edges
+
+# ---------- Cano curvo ---------- #
+
+def create_pipe_curved(
+    radius: float,
+    p0: Tuple[float,float,float],
+    p1: Tuple[float,float,float],
+    t0: Tuple[float,float,float],
+    t1: Tuple[float,float,float],
+    curve_samples: int = 50,
+    radial_segments: int = 16,
+):
+    """Cano que segue uma curva Hermite cúbica."""
+    t_vals = np.linspace(0,1,curve_samples)
+    path   = hermite_curve(np.asarray(p0), np.asarray(p1),
+                           np.asarray(t0), np.asarray(t1), t_vals)
+    tangents = np.gradient(path, axis=0)
+
+    angle = np.linspace(0, 2*np.pi, radial_segments, endpoint=False)
+    edge_set: set[tuple[int,int]] = set()
+    vertices = []
+
+    for j,(pt,tan) in enumerate(zip(path, tangents)):
+        n,b = _frenet_frame(tan)
+        ring = pt + np.outer(np.cos(angle), n*radius) \
+                 + np.outer(np.sin(angle), b*radius)
+        base = len(vertices)
+        vertices.extend(ring)
+
+        # Arestas circumferenciais
+        for i in range(radial_segments):
+            _add_edge(edge_set, base+i, base+((i+1)%radial_segments))
+
+        # Arestas longitudinais com anel anterior
+        if j > 0:
+            prev_base = base - radial_segments
+            for i in range(radial_segments):
+                _add_edge(edge_set, prev_base+i, base+i)
+
+    vertices = np.asarray(vertices, float)
+    edges    = sorted(edge_set)
+    return vertices, edges
