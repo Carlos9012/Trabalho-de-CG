@@ -10,9 +10,80 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Line3DCollection, Poly3DCollection
 from algebra import apply_transform, camera_R_T, perspective_matrix, project_ndc_to_screen
+import math
+
+from meshing import generate_mesh
 
 PALETTE = ["tab:blue", "tab:orange", "tab:green",
            "tab:red",  "tab:purple", "tab:brown"]
+
+def show_individual_solids(
+    solids,
+    meshes,
+    *,
+    show_faces=True,
+    show_wire=True,
+    show_mesh=False,
+    palette=PALETTE,
+):
+    """
+    Plota cada sólido em uma janela 3‑D separada, usando somente as
+    coordenadas locais.  *meshes* é obrigatório e deve conter uma tupla
+    (name, mesh_vertices, mesh_faces) para cada sólido exceto 'line'.
+    """
+    # ---- dicionário para acesso rápido às malhas ----------------------
+    mesh_lookup = {n: (v, f) for n, v, f in meshes}
+
+    for idx, (name, verts, edges) in enumerate(solids, 1):
+        color = palette[(idx - 1) % len(palette)]
+
+        fig = plt.figure(figsize=(5, 5), dpi=100)
+        ax  = fig.add_subplot(111, projection="3d")
+        ax.set_title(name)
+
+        # ---------- faces preenchidas ----------------------------------
+        if name != "line" and show_faces:
+            mv, mf = mesh_lookup[name]          # agora é obrigatório existir
+            if len(mf):
+                tris = [mv[f] for f in mf]
+                ax.add_collection3d(
+                    Poly3DCollection(tris, facecolors=color,
+                                     edgecolors="none", alpha=0.65)
+                )
+
+        # ---------- malha (arestas dos triângulos) --------------------
+        if name != "line" and show_mesh:
+            mv, mf = mesh_lookup[name]
+            if len(mf):
+                mesh_lines = []
+                for a, b, c in mf:
+                    mesh_lines += [[mv[a], mv[b]],
+                                   [mv[b], mv[c]],
+                                   [mv[c], mv[a]]]
+                ax.add_collection3d(
+                    Line3DCollection(np.array(mesh_lines),
+                                     colors=color, lw=0.6)
+                )
+
+        # ---------- wireframe ou linha --------------------------------
+        if show_wire or name == "line":
+            segs = np.array([[verts[i], verts[j]] for i, j in edges])
+            ax.add_collection3d(
+                Line3DCollection(segs, colors=color, lw=0.8)
+            )
+
+        # ---------- enquadramento -------------------------------------
+        bb_min, bb_max = verts.min(0), verts.max(0)
+        center = (bb_min + bb_max) / 2
+        radius = max(bb_max - bb_min) / 2 or 1.0
+        ax.set_xlim(center[0]-radius, center[0]+radius)
+        ax.set_ylim(center[1]-radius, center[1]+radius)
+        ax.set_zlim(center[2]-radius, center[2]+radius)
+        ax.set_xlabel("X"); ax.set_ylabel("Y"); ax.set_zlabel("Z")
+        ax.set_box_aspect([1,1,1])
+
+        plt.tight_layout()
+        plt.show()
 
 def show_scene(
     solids, meshes, transforms,

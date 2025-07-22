@@ -17,7 +17,7 @@ def main(show_faces=True, show_wire=True, show_mesh=True):
     solids = [
         ("cylinder",      *create_cylinder(1.0, 2.0)),
         ("pipe_straight", *create_pipe_straight(0.5, 4.0)),
-        ("box",           *create_box(2.0, 2.0, 2.0)),
+        ("box",           *create_box(6.0, 2.0, 2.0)),
     ]
     solids.append(("pipe_curved",
                    *create_pipe_curved(0.5, (0,0,0), (4,4,0), (4,0,0), (0,4,0))))
@@ -60,6 +60,13 @@ def main(show_faces=True, show_wire=True, show_mesh=True):
 
 
     # ---------- 5. Visualizações --------------------------------------
+    render.show_individual_solids(
+        solids, meshes,
+        show_faces=True,
+        show_wire=True,
+        show_mesh=False   # ative se quiser ver a malha
+    )
+    
     render.show_scene(solids, meshes, transforms,
                       show_faces=show_faces, show_wire=show_wire, show_mesh=show_mesh)
 
