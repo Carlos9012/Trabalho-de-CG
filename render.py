@@ -5,6 +5,7 @@ Agora com:
   • parâmetro voxel_size para controle de densidade
 """
 
+from collections import defaultdict
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Line3DCollection, Poly3DCollection
@@ -191,105 +192,238 @@ def show_camera_scene(
     
     
     
-def show_projection_scene(
+def show_projection_demonstration_final(
     solids, meshes, world_xforms,
     eye, target,
     fov_y=60, near=1.0, far=10.0,
-    img_size=(800, 800),
-    show_faces=False, show_wire=True, show_mesh=False,
-    palette=None,
+    show_faces=True,
+    show_mesh=False,
+    palette=PALETTE,
 ):
-    if palette is None:
-        palette = ["tab:blue", "tab:orange", "tab:green",
-                   "tab:red",  "tab:purple", "tab:brown"]
+    R_cam, T_cam, V = camera_R_T(eye, target)
+    d_proj = near + 0.25 * (far - near)        # plano “papel”
 
-    _, _, V = camera_R_T(eye, target)
-    aspect  = img_size[0] / img_size[1]
-    P       = perspective_matrix(fov_y, aspect, near, far)
+    # ---------- coleta em espaço‑câmera --------------------------------
+    camera_objs = []
+    line_data   = None
+    for idx, (name, verts, edges) in enumerate(solids):
+        color = palette[idx % len(palette)]
+        if name == "line":
+            v_line = apply_transform(apply_transform(verts, world_xforms[name]), V)
+            line_data = (v_line, edges, color)
+            continue
 
-    fig, ax = plt.subplots(figsize=(img_size[0]/100, img_size[1]/100), dpi=100)
-    ax.set_xlim(0, img_size[0]); ax.set_ylim(img_size[1], 0)
-    ax.set_aspect('equal'); ax.axis('off')
+        mv, mf = next((v,f) for n,v,f in meshes if n==name)
+        if len(mf):
+            mv_c = apply_transform(apply_transform(mv, world_xforms[name]), V)
+            camera_objs.append({'verts':mv_c, 'faces':mf, 'color':color})
 
+    # ---------- plot ---------------------------------------------------
+    fig = plt.figure(figsize=(9,7), dpi=100)
+    ax  = fig.add_subplot(111, projection='3d')
+    ax.view_init(elev=20, azim=-75)
+
+    # 1) objetos 3‑D originais
+    if show_faces:
+        for obj in camera_objs:
+            tris = [obj['verts'][f] for f in obj['faces']]
+            ax.add_collection3d(
+                Poly3DCollection(tris, facecolors=obj['color'],
+                                 edgecolors='none', alpha=0.6, shade=False)
+            )
+    if show_mesh:
+        for obj in camera_objs:
+            lines = []
+            for a,b,c in [obj['verts'][f] for f in obj['faces']]:
+                lines += [[a,b],[b,c],[c,a]]
+            ax.add_collection3d(
+                Line3DCollection(np.array(lines),
+                                 colors=obj['color'], lw=0.6)
+            )
+
+    # linha (objeto sempre wire)
+    if line_data:
+        v_line, edges, col = line_data
+        for i,j in edges:
+            ax.add_collection3d(
+                Line3DCollection([[v_line[i], v_line[j]]],
+                                 colors=col, lw=1.2)
+            )
+
+    # 2) retângulo do plano de projeção
+    h_p = 2 * d_proj * np.tan(np.deg2rad(fov_y/2))
+    w_p = h_p
+    plane_center = np.array([0,0,-d_proj])
+    plane = plane_center + np.array(
+        [[-w_p/2,-h_p/2,0],[ w_p/2,-h_p/2,0],
+         [ w_p/2, h_p/2,0],[-w_p/2, h_p/2,0]]
+    )
+    ax.add_collection3d(
+        Poly3DCollection([plane], facecolors='white',
+                         edgecolors='k', alpha=0.5, shade=False)
+    )
+
+    # 3) projeção de cada objeto sobre o plano
+    for obj in camera_objs:
+        v   = obj['verts']
+        col = obj['color']
+        front = v[:,2] < -1e-5
+        if not front.any(): continue
+
+        proj = np.copy(v)
+        zc   = proj[front,2]
+        proj[front,0] = proj[front,0] * d_proj / -zc
+        proj[front,1] = proj[front,1] * d_proj / -zc
+        proj[front,2] = -d_proj
+
+        tris_proj = []
+        for f in obj['faces']:
+            if all(front[i] for i in f):
+                tris_proj.append([proj[i] for i in f])
+
+        if tris_proj:
+            ax.add_collection3d(
+                Poly3DCollection(tris_proj, facecolors=col,
+                                 edgecolors='none', alpha=1.0, shade=False)
+            )
+
+    # projeção da linha
+    if line_data:
+        v_line, edges, col = line_data
+        proj_line = []
+        for p in v_line:
+            if p[2] < -1e-5:
+                proj_line.append([p[0]*d_proj/-p[2],
+                                  p[1]*d_proj/-p[2],
+                                  -d_proj])
+            else:
+                proj_line.append(p)  # invisível; não desenha
+        for i,j in edges:
+            ax.add_collection3d(
+                Line3DCollection([[proj_line[i], proj_line[j]]],
+                                 colors=col, lw=1.2)
+            )
+
+    # 4) frustum + pontos
+    world_origin_c = apply_transform(np.array([[0,0,0]]), V)[0]
+    ax.scatter(0,0,0,           color='red',    s=50, label='Camera')
+    ax.scatter(*world_origin_c, color='yellow', s=40, label='World 0')
+
+    h_n, h_f = 2*np.tan(np.deg2rad(fov_y/2))*near, 2*np.tan(np.deg2rad(fov_y/2))*far
+    w_n, w_f = h_n, h_f
+    cn, cf = np.array([0,0,-near]), np.array([0,0,-far])
+    N = cn + np.array([[-w_n/2,-h_n/2,0],[ w_n/2,-h_n/2,0],
+                       [ w_n/2, h_n/2,0],[-w_n/2, h_n/2,0]])
+    F = cf + np.array([[-w_f/2,-h_f/2,0],[ w_f/2,-h_f/2,0],
+                       [ w_f/2, h_f/2,0],[-w_f/2, h_f/2,0]])
+    fr = [[N[i],N[(i+1)%4]] for i in range(4)] + \
+         [[F[i],F[(i+1)%4]] for i in range(4)] + \
+         [[N[i],F[i]] for i in range(4)]
+    ax.add_collection3d(Line3DCollection(np.array(fr), colors='r', lw=1.0))
+
+    # limites
+    lim = far*1.1
+    ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim); ax.set_zlim(-lim, 0)
+    ax.set_xlabel('Xc'); ax.set_ylabel('Yc'); ax.set_zlabel('Zc')
+    ax.set_title('Projeção no plano (cores preservadas + linha)')
+    ax.legend(); plt.tight_layout(); plt.show()
+    
+    
+    
+    
+    
+    
+    # ----------------------------------------------------------------------
+# Projeção 2‑D mostrando só a pirâmide menor + plano da janela
+# ----------------------------------------------------------------------
+def show_projection_window_only(
+    solids, meshes, world_xforms,
+    eye, target,
+    fov_y=60, near=1.0, far=10.0,
+    palette=PALETTE,
+):
+    R_cam, T_cam, V = camera_R_T(eye, target)
+    d_proj = near + 0.25 * (far - near)          # mesmo plano-papel
+
+    # ---------- coleta em espaço‑câmera --------------------------------
+    objs, line_data = [], None
     for idx, (name, verts, edges) in enumerate(solids):
         col = palette[idx % len(palette)]
-        M   = P @ V @ world_xforms[name]
-
-        # -------- vértices em clip space -------------------------------
-        v_h   = np.hstack([verts, np.ones((len(verts), 1))])      # (N,4)
-        clip  = (M @ v_h.T).T
-        w     = clip[:, 3]
-
-        # mantêm só pontos dentro do cubo NDC
-        ndc   = clip[:, :3] / w[:, None]
-        in_ndc = (w > 0) & (np.abs(ndc[:,0]) <= 1) & \
-                 (np.abs(ndc[:,1]) <= 1) & (np.abs(ndc[:,2]) <= 1)
-
-        if not in_ndc.any():
-            continue
-
-        screen = np.empty((len(verts), 2))
-        screen[in_ndc] = project_ndc_to_screen(ndc[in_ndc, :2], *img_size)
-        idx_scr = {old: new for new, old in enumerate(np.where(in_ndc)[0])}
-
-        # -------- LINHA (sempre mostrada) ------------------------------
         if name == "line":
-            for i, j in edges:
-                if in_ndc[i] and in_ndc[j]:
-                    p, q = idx_scr[i], idx_scr[j]
-                    ax.plot([screen[p,0], screen[q,0]],
-                            [screen[p,1], screen[q,1]],
-                            color=col, lw=1)
+            v_line = apply_transform(apply_transform(verts, world_xforms[name]), V)
+            line_data = (v_line, edges, col)
             continue
+        mv, mf = next((v,f) for n,v,f in meshes if n==name)
+        if len(mf):
+            mv_c = apply_transform(apply_transform(mv, world_xforms[name]), V)
+            objs.append({'v':mv_c, 'f':mf, 'c':col})
 
-        # -------- wireframe lógico ------------------------------------
-        if show_wire:
-            for i, j in edges:
-                if in_ndc[i] and in_ndc[j]:
-                    p, q = idx_scr[i], idx_scr[j]
-                    ax.plot([screen[p,0], screen[q,0]],
-                            [screen[p,1], screen[q,1]],
-                            color=col, lw=1)
+    # ---------- plot básico -------------------------------------------
+    fig = plt.figure(figsize=(8,6), dpi=100)
+    ax  = fig.add_subplot(111, projection='3d')
+    ax.view_init(elev=20, azim=-75)
 
-        # -------- faces / malha ---------------------------------------
-        if name != "line" and (show_faces or show_mesh):
-            mv, mf = next((v, f) for n, v, f in meshes if n == name)
-            mv_h   = np.hstack([mv, np.ones((len(mv),1))])
-            clip_m = (M @ mv_h.T).T
-            w_m    = clip_m[:,3]
+    # retângulo da janela (plano de projeção)
+    h_p = 2*d_proj*np.tan(np.deg2rad(fov_y/2)); w_p = h_p
+    plane_c = np.array([0,0,-d_proj])
+    rect = plane_c + np.array(
+        [[-w_p/2,-h_p/2,0],[ w_p/2,-h_p/2,0],
+         [ w_p/2, h_p/2,0],[-w_p/2, h_p/2,0]]
+    )
+    ax.add_collection3d(Poly3DCollection([rect], facecolors='white',
+                                         edgecolors='k', alpha=.4, shade=False))
 
-            ndc_m  = clip_m[:, :3] / w_m[:, None]
-            in_m   = (w_m > 0) & (np.abs(ndc_m[:,0]) <= 1) & \
-                     (np.abs(ndc_m[:,1]) <= 1) & (np.abs(ndc_m[:,2]) <= 1)
-            if not in_m.any():
-                continue
+    # arestas da pirâmide menor
+    edges_small = [[np.zeros(3), rect[i]] for i in range(4)] + \
+                  [[rect[i], rect[(i+1)%4]] for i in range(4)]
+    ax.add_collection3d(Line3DCollection(edges_small, colors='k', lw=1.2))
 
-            scr_m = project_ndc_to_screen(ndc_m[in_m,:2], *img_size)
-            idx_scr_m = {old:new for new,old in enumerate(np.where(in_m)[0])}
+    # ---------- projeção dos objetos ----------------------------------
+    for obj in objs:
+        v  = obj['v']; col = obj['c']
+        front = v[:,2] < -1e-5
+        if not front.any(): continue
+        proj = np.copy(v)
+        zc   = proj[front,2]
+        proj[front,0] = proj[front,0] * d_proj / -zc
+        proj[front,1] = proj[front,1] * d_proj / -zc
+        proj[front,2] = -d_proj
+        tris = []
+        for f in obj['f']:
+            if all(front[i] for i in f):
+                tris.append([proj[i] for i in f])
+        if tris:
+            ax.add_collection3d(
+                Poly3DCollection(tris, facecolors=col,
+                                 edgecolors='none', alpha=1.0, shade=False)
+            )
 
-            for a, b, c in mf:
-                if not (in_m[a] and in_m[b] and in_m[c]):
-                    continue
-                pa, pb, pc = idx_scr_m[a], idx_scr_m[b], idx_scr_m[c]
+    # ---------- projeção da linha -------------------------------------
+    if line_data:
+        v_line, edges, col = line_data
+        proj_line = []
+        for p in v_line:
+            if p[2] < -1e-5:
+                proj_line.append([p[0]*d_proj/-p[2],
+                                  p[1]*d_proj/-p[2],
+                                  -d_proj])
+            else:
+                proj_line.append(p)          # invisível
+        for i,j in edges:
+            if proj_line[i][2] == -d_proj and proj_line[j][2] == -d_proj:
+                ax.add_collection3d(
+                    Line3DCollection([[proj_line[i], proj_line[j]]],
+                                     colors=col, lw=1.2)
+                )
 
-                if show_faces:
-                    ax.fill([scr_m[pa,0], scr_m[pb,0], scr_m[pc,0]],
-                            [scr_m[pa,1], scr_m[pb,1], scr_m[pc,1]],
-                            facecolor=col, edgecolor='none', alpha=0.3)
+    # ---------- pontos especiais --------------------------------------
+    ax.scatter(0,0,0, color='red', s=50, label='Camera')
+    ax.set_xlim(-w_p, w_p); ax.set_ylim(-w_p, w_p); ax.set_zlim(-2*d_proj, 0)
+    ax.set_xlabel('Xc'); ax.set_ylabel('Yc'); ax.set_zlabel('Zc')
+    ax.set_title('Janela de projeção + pirâmide menor (2‑D projetado)')
+    ax.legend(); plt.tight_layout(); plt.show()
 
-                if show_mesh:
-                    ax.plot([scr_m[pa,0], scr_m[pb,0]],
-                            [scr_m[pa,1], scr_m[pb,1]],
-                            color=col, lw=0.6)
-                    ax.plot([scr_m[pb,0], scr_m[pc,0]],
-                            [scr_m[pb,1], scr_m[pc,1]],
-                            color=col, lw=0.6)
-                    ax.plot([scr_m[pc,0], scr_m[pa,0]],
-                            [scr_m[pc,1], scr_m[pa,1]],
-                            color=col, lw=0.6)
 
-    ax.set_title('Projeção em perspectiva 2-D (clipped em NDC)')
-    plt.tight_layout(); plt.show()
     
     
     

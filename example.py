@@ -70,12 +70,21 @@ def main(show_faces=True, show_wire=True, show_mesh=True):
         fov_y=60, near=near, far=far,    # ← usa valores auto
         show_faces=True, show_wire=False, show_mesh=False,
     )
-    render.show_projection_scene(
+    
+    render.show_projection_demonstration_final(
         solids, meshes, transforms,
         eye=eye, target=target,
-        fov_y=60, near=near, far=far,    # ← idem
-        show_faces=True, show_wire=False, show_mesh=False,
+        fov_y=60, near=near, far=far,
+        show_faces=True,   # Desenha os objetos 3D com faces preenchidas
+        show_mesh=True,   # Desenha a malha sobre as faces para mais detalhes
     )
+    
+    render.show_projection_window_only(
+        solids, meshes, transforms,
+        eye=eye, target=target,
+        near=near, far=far, fov_y=60
+    )
+    
     
     render.rasterize_projection_scene(
         solids, meshes, transforms,
